@@ -282,7 +282,11 @@ bool InterpolateVertexValues(
 // and the point-light glows are instances of one batch per effect type
 // (EUR 0x00332A14 adds an instance, 0x003FC2F8 builds the batch): every game
 // frame the CPU transforms each instance, sorts the instances by depth and
-// writes four corners per instance, six indices per quad. Quad k of one frame
+// writes four corners per instance, six 16-bit indices per quad. The batch's
+// draw (0x003FB5EC, the primitive call at 0x003FB980/0x003FB994) is a
+// triangle strip (GL mode 5) unless the model header has flag 0x20 (mode 4,
+// a list): the six indices of a quad are its four corners and two degenerate
+// ones that join it to its neighbours. Quad k of one frame
 // is often not quad k of the next (re-sorted, spawned, expired), and the
 // count changes whenever an effect starts or ends. Blending vertex k with
 // vertex k put a ripple halfway to another one or folded it onto its turned
@@ -291,34 +295,56 @@ bool InterpolateVertexValues(
 // paired with its previous one even when the count changed, and its quads
 // by shape.
 
-// The quads of an indexed triangle list whose every group of six indices
-// uses exactly the four vertices 4q..4q+3 (after BaseVertex), or 0: not such
-// a draw, or above kOot3dPicaVisualQuadBatchMaximumQuads.
-uint32_t QuadBatchQuads(const Oot3dPicaVulkanDrawPlan& draw) {
-    if (!draw.Indexed || draw.State.Topology != Oot3dPicaPrimitiveTopology::TriangleList ||
-        draw.VertexCount == 0U || draw.VertexCount % 6U != 0U ||
-        draw.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads) {
-        return 0U;
+// Why an indexed list or strip of 6n indices is not a quad batch (perf.txt
+// quad_reject_*), so a log tells which rule the game's batches miss.
+enum class QuadBatchVerdict : uint8_t {
+    Taken,
+    NotCandidate,  // not indexed, not a list or strip, no multiple of 6
+    Cap,           // above kOot3dPicaVisualQuadBatchMaximumQuads quads
+    Unreadable,    // fewer index bytes than indices
+    Corners,       // a group of six without all four of its quad's vertices
+    Join,          // an index outside its quad (list) or beyond the neighbours (strip)
+};
+
+// An indexed draw that uses four vertices per quad. Each group of six indices
+// holds all four vertices 4q..4q+3 (after BaseVertex): in a triangle list
+// nothing else; in a strip the two other indices are the degenerate joins,
+// within the neighbouring quads (4q-4..4q+7). `quads` is set when Taken.
+// (0.2.5-test.5 took only lists: logs49 counted quad_batches=0 everywhere.)
+QuadBatchVerdict CheckQuadBatch(const Oot3dPicaVulkanDrawPlan& draw, uint32_t& quads) {
+    const bool strip = draw.State.Topology == Oot3dPicaPrimitiveTopology::TriangleStrip;
+    if (!draw.Indexed || (!strip && draw.State.Topology != Oot3dPicaPrimitiveTopology::TriangleList) ||
+        draw.VertexCount == 0U || draw.VertexCount % 6U != 0U) {
+        return QuadBatchVerdict::NotCandidate;
     }
+    if (draw.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads) return QuadBatchVerdict::Cap;
     const auto bytes = draw.ResolvedIndexBytes();
     const size_t indexBytes = draw.IndicesAre16Bit ? 2U : 1U;
-    if (bytes.size() < size_t{draw.VertexCount} * indexBytes) {
-        return 0U;
-    }
-    const uint32_t quads = draw.VertexCount / 6U;
-    for (uint32_t quad = 0; quad < quads; ++quad) {
+    if (bytes.size() < size_t{draw.VertexCount} * indexBytes) return QuadBatchVerdict::Unreadable;
+    const uint32_t count = draw.VertexCount / 6U;
+    for (uint32_t quad = 0; quad < count; ++quad) {
         uint32_t corners = 0;
         for (uint32_t item = 0; item < 6U; ++item) {
             const size_t at = (size_t{quad} * 6U + item) * indexBytes;
             uint32_t index = bytes[at];
             if (draw.IndicesAre16Bit) index |= uint32_t{bytes[at + 1U]} << 8U;
             const int64_t corner = int64_t{index} + draw.BaseVertex - int64_t{quad} * 4;
-            if (corner < 0 || corner > 3) return 0U;
-            corners |= 1U << corner;
+            if (corner >= 0 && corner <= 3) {
+                corners |= 1U << corner;
+            } else if (!strip || corner < -4 || corner > 7) {
+                return QuadBatchVerdict::Join;
+            }
         }
-        if (corners != 0xFU) return 0U;
+        if (corners != 0xFU) return QuadBatchVerdict::Corners;
     }
-    return quads;
+    quads = count;
+    return QuadBatchVerdict::Taken;
+}
+
+// The quads of a quad batch, or 0.
+uint32_t QuadBatchQuads(const Oot3dPicaVulkanDrawPlan& draw) {
+    uint32_t quads = 0;
+    return CheckQuadBatch(draw, quads) == QuadBatchVerdict::Taken ? quads : 0U;
 }
 
 // Where a quad batch's corners are: the transform hook's position input when
@@ -878,9 +904,13 @@ bool HaveMatchingQuadBatchLayout(const Oot3dPicaVulkanDrawPlan& previous,
            QuadBatchQuads(current) != 0U;
 }
 
-// The strict draw identity (ComputeOot3dPicaVisualDrawIdentity); without the
-// vertex count it is the key of a quad batch across frames.
-uint64_t HashVisualDrawIdentity(const Oot3dPicaVulkanDrawPlan& plan, bool withVertexCount) {
+// The strict draw identity (ComputeOot3dPicaVisualDrawIdentity). Without its
+// geometry buffers (vertex count, vertex base, loader and index addresses)
+// it is the key of an effect quad batch across frames: the game
+// double-buffers those batches (a model header with flag 0x100 gets two
+// vertex and index buffers, EUR 0x00348C18; each build writes the other one,
+// 0x003FCB00), so their addresses alternate every frame.
+uint64_t HashVisualDrawIdentity(const Oot3dPicaVulkanDrawPlan& plan, bool withGeometryBuffers) {
     uint64_t hash = kFnvOffset;
     HashValue(hash, plan.CompositionDomain);
     HashValue(hash, plan.Composition.Layer);
@@ -898,12 +928,12 @@ uint64_t HashVisualDrawIdentity(const Oot3dPicaVulkanDrawPlan& plan, bool withVe
     HashValue(hash, plan.FragmentShader.StateKey);
     HashValue(hash, plan.Indexed);
     HashValue(hash, plan.IndicesAre16Bit);
-    if (withVertexCount) HashValue(hash, plan.VertexCount);
-    HashValue(hash, plan.State.VertexInput.PhysicalBaseAddress);
-    HashValue(hash, plan.State.VertexInput.IndexPhysicalAddress);
+    if (withGeometryBuffers) HashValue(hash, plan.VertexCount);
+    if (withGeometryBuffers) HashValue(hash, plan.State.VertexInput.PhysicalBaseAddress);
+    if (withGeometryBuffers) HashValue(hash, plan.State.VertexInput.IndexPhysicalAddress);
     HashValue(hash, plan.State.VertexInput.VertexOffset);
     for (const auto& loader : plan.State.VertexInput.Loaders) {
-        HashValue(hash, loader.PhysicalAddress);
+        if (withGeometryBuffers) HashValue(hash, loader.PhysicalAddress);
         HashValue(hash, loader.DataOffset);
         HashValue(hash, loader.ByteStride);
         HashValue(hash, loader.ComponentCount);
@@ -1340,6 +1370,46 @@ void BuildVisualDrawMatching(
         matching.StrictOrdinalMatches, &matching.AmbiguousPrevious,
         &matching.AmbiguousCurrent);
 
+    // Effect quad batches the strict identity left unpaired (no native key:
+    // the game draws them outside the hooked CMB submit; their buffers
+    // alternate; their quad count changes): by their identity without the
+    // geometry buffers, in draw order within a key (model[0] then the
+    // overflow model[1] of one effect type). Before the structural stages,
+    // which would pair two batches of one effect type by equal quad count.
+    {
+        auto& previousKeys = scratch.PreviousKeys;
+        auto& currentKeys = scratch.CurrentKeys;
+        previousKeys.clear();
+        currentKeys.clear();
+        for (size_t i = 0; i < previous.Draws.size(); ++i)
+            if (scratch.PreviousMatched[i] == 0U && QuadBatchQuads(previous.Draws[i]) != 0U)
+                previousKeys.emplace_back(HashVisualDrawIdentity(previous.Draws[i], false), static_cast<uint32_t>(i));
+        for (size_t i = 0; i < current.Draws.size(); ++i)
+            if (scratch.CurrentMatched[i] == 0U && QuadBatchQuads(current.Draws[i]) != 0U)
+                currentKeys.emplace_back(HashVisualDrawIdentity(current.Draws[i], false), static_cast<uint32_t>(i));
+        if (!previousKeys.empty() && !currentKeys.empty()) {
+            std::sort(previousKeys.begin(), previousKeys.end());
+            std::sort(currentKeys.begin(), currentKeys.end());
+            ForEachCommonVisualGroup(previousKeys, currentKeys,
+                                     [&](std::span<const VisualKeyedDraw> before, std::span<const VisualKeyedDraw> after) {
+                const size_t pairs = std::min(before.size(), after.size());
+                const auto kind = before.size() == 1U && after.size() == 1U ? VisualDrawMatchKind::StrictUnique
+                                                                            : VisualDrawMatchKind::StrictOrdinal;
+                for (size_t ordinal = 0; ordinal < pairs; ++ordinal) {
+                    const size_t previousIndex = before[ordinal].second;
+                    const size_t currentIndex = after[ordinal].second;
+                    if (!HaveMatchingQuadBatchLayout(previous.Draws[previousIndex], current.Draws[currentIndex]))
+                        continue;
+                    matching.PreviousByCurrent[currentIndex] = VisualDrawMatch{previousIndex, kind};
+                    scratch.PreviousMatched[previousIndex] = 1U;
+                    scratch.CurrentMatched[currentIndex] = 1U;
+                    ++(kind == VisualDrawMatchKind::StrictUnique ? matching.StrictUniqueMatches
+                                                                 : matching.StrictOrdinalMatches);
+                }
+            });
+        }
+    }
+
     size_t unusedStructuralUniqueMatches = 0;
     MatchEqualCardinalityGroups(
         previous, current, nullptr, scratch,
@@ -1361,35 +1431,6 @@ void BuildVisualDrawMatching(
         previousPipeline, currentPipeline,
         HaveMatchingPipelineLayout, VisualDrawMatchKind::PipelineOrdinal,
         matching.PipelineOrdinalMatches);
-    // Effect quad batches without a native key whose quad count changed: one
-    // per strict identity without the count on each side.
-    {
-        auto& previousKeys = scratch.PreviousKeys;
-        auto& currentKeys = scratch.CurrentKeys;
-        previousKeys.clear();
-        currentKeys.clear();
-        for (size_t i = 0; i < previous.Draws.size(); ++i)
-            if (scratch.PreviousMatched[i] == 0U && QuadBatchQuads(previous.Draws[i]) != 0U)
-                previousKeys.emplace_back(HashVisualDrawIdentity(previous.Draws[i], false), static_cast<uint32_t>(i));
-        for (size_t i = 0; i < current.Draws.size(); ++i)
-            if (scratch.CurrentMatched[i] == 0U && QuadBatchQuads(current.Draws[i]) != 0U)
-                currentKeys.emplace_back(HashVisualDrawIdentity(current.Draws[i], false), static_cast<uint32_t>(i));
-        if (!previousKeys.empty() && !currentKeys.empty()) {
-            std::sort(previousKeys.begin(), previousKeys.end());
-            std::sort(currentKeys.begin(), currentKeys.end());
-            ForEachCommonVisualGroup(previousKeys, currentKeys,
-                                     [&](std::span<const VisualKeyedDraw> before, std::span<const VisualKeyedDraw> after) {
-                if (before.size() != 1U || after.size() != 1U) return;
-                const size_t previousIndex = before[0].second;
-                const size_t currentIndex = after[0].second;
-                if (!HaveMatchingQuadBatchLayout(previous.Draws[previousIndex], current.Draws[currentIndex])) return;
-                matching.PreviousByCurrent[currentIndex] = VisualDrawMatch{previousIndex, VisualDrawMatchKind::StrictUnique};
-                scratch.PreviousMatched[previousIndex] = 1U;
-                scratch.CurrentMatched[currentIndex] = 1U;
-                ++matching.StrictUniqueMatches;
-            });
-        }
-    }
 
     const auto actualMatches = static_cast<size_t>(std::count_if(
         matching.PreviousByCurrent.begin(), matching.PreviousByCurrent.end(),
@@ -1424,6 +1465,7 @@ void PairMatchedQuadBatch(const Oot3dPicaVulkanDrawPlan& previousDraw, const Oot
     int32_t* const sources = pairing.Sources.data() + first;
     const auto result =
         PairVisualQuadBatch(previousDraw, currentDraw, previousQuads, currentQuads, sources, pairing.Scratch);
+    if (result == VisualQuadPairing::Unreadable) ++stats.RejectedUnreadable;
     if (result == VisualQuadPairing::Identity || (result == VisualQuadPairing::Unreadable && !countChanged)) {
         pairing.Sources.resize(first);  // the slot-wise blend, as before
         return;
@@ -1482,8 +1524,18 @@ AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const 
         quadPairing->OfDraw.assign(current.Draws.size(), {});
     }
     for (size_t currentIndex = 0; currentIndex < current.Draws.size(); ++currentIndex) {
-        const uint32_t currentQuads = quadPairing != nullptr ? QuadBatchQuads(current.Draws[currentIndex]) : 0U;
-        if (currentQuads != 0U) ++quadPairing->Stats.Batches;
+        uint32_t currentQuads = 0U;
+        if (quadPairing != nullptr) {
+            auto& quadStats = quadPairing->Stats;
+            switch (CheckQuadBatch(current.Draws[currentIndex], currentQuads)) {
+            case QuadBatchVerdict::Taken: ++quadStats.Batches; break;
+            case QuadBatchVerdict::NotCandidate: break;
+            case QuadBatchVerdict::Cap: ++quadStats.RejectedCap; break;
+            case QuadBatchVerdict::Unreadable: ++quadStats.RejectedUnreadable; break;
+            case QuadBatchVerdict::Corners: ++quadStats.RejectedCorners; break;
+            case QuadBatchVerdict::Join: ++quadStats.RejectedJoin; break;
+            }
+        }
         if (!matching.PreviousByCurrent[currentIndex].has_value()) {
             continue;
         }

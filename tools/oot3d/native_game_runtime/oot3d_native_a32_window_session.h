@@ -896,6 +896,10 @@ private:
     uint64_t QuadRematched = 0;
     uint64_t QuadNew = 0;
     uint64_t QuadDropped = 0;
+    uint64_t QuadRejectCorners = 0;
+    uint64_t QuadRejectJoin = 0;
+    uint64_t QuadRejectCap = 0;
+    uint64_t QuadRejectUnreadable = 0;
   };
   VisualUnmatchedTotals visualUnmatchedTotals;
   struct InterpolationPerfCounters {

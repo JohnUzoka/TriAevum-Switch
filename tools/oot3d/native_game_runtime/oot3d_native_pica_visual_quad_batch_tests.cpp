@@ -60,6 +60,8 @@ std::shared_ptr<const Oot3dPicaTemporalVertexProgram> Program() {
 struct BatchOptions {
     bool Native = true;   // a native key (CMB renderer); else only the strict identity
     bool Hooked = true;   // the program names the position input; else the lowest float input is taken
+    uint32_t Buffer = 0;  // which of the game's buffer pairs (the batch's are double-buffered)
+    bool Strip = false;   // the game's default: a triangle strip, two degenerate joins per quad
 };
 
 Oot3dPicaVulkanDrawPlan Batch(const std::vector<Quad>& quads, uint64_t submission, const BatchOptions& options) {
@@ -74,12 +76,17 @@ Oot3dPicaVulkanDrawPlan Batch(const std::vector<Quad>& quads, uint64_t submissio
     plan.State.Framebuffer.ColorPhysicalAddress = kTopColor;
     plan.State.Framebuffer.Width = 240U;
     plan.State.Framebuffer.Height = 400U;
-    plan.State.VertexInput.PhysicalBaseAddress = 0x30000000U;
-    plan.State.VertexInput.IndexPhysicalAddress = 0x30100000U;
+    // The game's double buffer: every address of the batch's geometry moves with the buffer pair.
+    const uint32_t base = 0x30000000U + options.Buffer * 0x10000U;
+    plan.State.VertexInput.PhysicalBaseAddress = base;
+    plan.State.VertexInput.IndexPhysicalAddress = base + 0x8000U;
+    plan.State.VertexInput.Loaders[0] = {0, base, static_cast<uint8_t>(kStride), 2, {0, 1}};
     Oot3dPicaVulkanVertexBinding binding;
     binding.Binding = 0;
     binding.ByteStride = kStride;
-    binding.Bytes.resize(quads.size() * 4U * kStride);
+    binding.SourcePhysicalAddress = base;
+    // A strip's last join points one vertex past the quads: the snapshot holds it (stale data).
+    binding.Bytes.resize((quads.size() * 4U + (options.Strip ? 1U : 0U)) * kStride);
     for (size_t q = 0; q < quads.size(); ++q) {
         const auto points = quads[q].Points();
         for (size_t k = 0; k < 4U; ++k) {
@@ -94,9 +101,12 @@ Oot3dPicaVulkanDrawPlan Batch(const std::vector<Quad>& quads, uint64_t submissio
     plan.VertexAttributes.push_back({2, 0, Oot3dPicaVertexFormat::UnsignedByte, 4, 12});
     plan.Indexed = true;
     plan.IndicesAre16Bit = true;
-    plan.IndexPhysicalAddress = 0x30100000U;
+    plan.IndexPhysicalAddress = base + 0x8000U;
+    if (options.Strip) plan.State.Topology = Oot3dPicaPrimitiveTopology::TriangleStrip;
     for (size_t q = 0; q < quads.size(); ++q) {
-        for (const uint32_t corner : {0U, 1U, 2U, 2U, 1U, 3U}) {
+        const auto list = {0U, 1U, 2U, 2U, 1U, 3U};
+        const auto strip = {0U, 2U, 1U, 3U, 3U, 4U};  // the quad, then the joins to the next one
+        for (const uint32_t corner : options.Strip ? strip : list) {
             const auto index = static_cast<uint16_t>(q * 4U + corner);
             plan.IndexBytes.push_back(static_cast<uint8_t>(index));
             plan.IndexBytes.push_back(static_cast<uint8_t>(index >> 8U));
@@ -177,10 +187,10 @@ struct Sampled {
 };
 
 // The window loop's in-between frame (exact step and carry on).
-std::unique_ptr<Sampled> InBetween(Oot3dPicaVulkanDrawPlan before, Oot3dPicaVulkanDrawPlan after) {
+std::unique_ptr<Sampled> InBetweenFrames(Oot3dPicaVisualFrame before, Oot3dPicaVisualFrame after) {
     auto out = std::make_unique<Sampled>();
-    out->Previous = Frame(1, std::move(before));
-    out->Current = Frame(2, std::move(after));
+    out->Previous = std::move(before);
+    out->Current = std::move(after);
     Oot3dPicaPreparedVisualTransition transition;
     transition.SetOptions({.ExactStep = true, .CarryUnmatched = true});
     if (!transition.Prepare(out->Previous, out->Current) ||
@@ -192,11 +202,17 @@ std::unique_ptr<Sampled> InBetween(Oot3dPicaVulkanDrawPlan before, Oot3dPicaVulk
     return out;
 }
 
-const Oot3dPicaVisualDrawView* BatchView(const Sampled& sampled) {
+std::unique_ptr<Sampled> InBetween(Oot3dPicaVulkanDrawPlan before, Oot3dPicaVulkanDrawPlan after) {
+    return InBetweenFrames(Frame(1, std::move(before)), Frame(2, std::move(after)));
+}
+
+const Oot3dPicaVisualDrawView* ViewOf(const Sampled& sampled, size_t currentDraw) {
     for (const auto& view : sampled.View.Draws)
-        if (view.BasePlan == &sampled.Current.Draws[1]) return &view;
+        if (view.BasePlan == &sampled.Current.Draws[currentDraw]) return &view;
     return nullptr;
 }
+
+const Oot3dPicaVisualDrawView* BatchView(const Sampled& sampled) { return ViewOf(sampled, 1); }
 
 void TestResorted() {
     for (const bool native : {true, false}) {
@@ -348,6 +364,179 @@ void TestCap() {
     }
 }
 
+// The game double-buffers its effect batches (a model header with flag 0x100 gets two vertex and index buffers,
+// EUR 0x00348C18; each build writes the other one, 0x003FCB00) and draws them outside the hooked CMB submit (no
+// native key): every geometry address of the batch alternates between frames. 0.2.5-test.5 keyed the
+// count-changed batch with those addresses, so it never paired: the blink stayed.
+void TestDoubleBuffered() {
+    const Quad a{{0, -1, -50}, 10}, b{{100, -1, -80}, 20};
+    const Quad grownA{{0, -1, -50}, 11}, grownB{{100, -1, -80}, 21};
+    const Quad newC{{-200, -1, -70}, 5};
+    {
+        auto sampled = InBetween(Batch({a, b}, 5, {.Native = false, .Buffer = 0}),
+                                 Batch({newC, grownB, grownA}, 15, {.Native = false, .Buffer = 1}));
+        const auto* view = BatchView(*sampled);
+        const auto bytes = view != nullptr ? SampledBytes(*view) : std::span<const uint8_t>{};
+        Check(bytes.size() == 3U * 4U * kStride && Near(QuadOf(bytes, 0), newC.Points()) &&
+                  Near(QuadOf(bytes, 1), Mix(b, grownB, 0.5F)) && Near(QuadOf(bytes, 2), Mix(a, grownA, 0.5F)),
+              "double-buffered, count changed: paired, quads by shape, the new one as it is");
+        // B keeps slot 1, A moves from slot 0 to slot 2.
+        Check(sampled->Stats.Paired == 1 && sampled->Stats.CountChanged == 1 && sampled->Stats.Rematched == 1 &&
+                  sampled->Stats.UnmatchedNew == 1 && sampled->Stats.Dropped == 0,
+              "double-buffered, count changed: counters paired 1, count changed 1, rematched 1, new 1");
+    }
+    {
+        auto sampled = InBetween(Batch({a, b}, 5, {.Native = false, .Buffer = 0}),
+                                 Batch({grownB, grownA}, 15, {.Native = false, .Buffer = 1}));
+        const auto* view = BatchView(*sampled);
+        const auto bytes = view != nullptr ? SampledBytes(*view) : std::span<const uint8_t>{};
+        Check(!bytes.empty() && Near(QuadOf(bytes, 0), Mix(b, grownB, 0.5F)) &&
+                  Near(QuadOf(bytes, 1), Mix(a, grownA, 0.5F)),
+              "double-buffered, same count re-sorted: quads by shape");
+        Check(sampled->Stats.Paired == 1 && sampled->Stats.CountChanged == 0 && sampled->Stats.Rematched == 2,
+              "double-buffered, same count: counters paired 1, rematched 2");
+    }
+}
+
+// One effect type's batch and its overflow batch (the game's model[0] and model[1]) share a key: they pair in
+// draw order, model[0] with model[0], even when model[0]'s old quad count equals model[1]'s new one.
+void TestSameKeyBatchesInOrder() {
+    const Quad a{{0, -1, -50}, 10}, b{{100, -1, -80}, 20}, c{{-300, -1, -40}, 8};
+    const Quad grownA{{0, -1, -50}, 11}, grownB{{100, -1, -80}, 21}, grownC{{-300, -1, -40}, 9};
+    const Quad d{{50, -1, -200}, 6}, e{{-350, -1, -45}, 6};
+    const auto frame = [](uint64_t sequence, Oot3dPicaVulkanDrawPlan first, Oot3dPicaVulkanDrawPlan overflow) {
+        Oot3dPicaVisualFrame out;
+        out.Sequence = sequence;
+        out.TopTransfer.InputPhysicalAddress = kTopColor;
+        out.Draws.push_back(Ground(sequence * 10U));
+        out.Draws.push_back(std::move(first));
+        out.Draws.push_back(std::move(overflow));
+        return out;
+    };
+    auto sampled = InBetweenFrames(frame(1, Batch({a, b}, 5, {.Native = false, .Buffer = 0}),
+                                         Batch({c}, 6, {.Native = false, .Buffer = 2})),
+                                   frame(2, Batch({grownA, grownB, d}, 15, {.Native = false, .Buffer = 1}),
+                                         Batch({grownC, e}, 16, {.Native = false, .Buffer = 3})));
+    const auto* first = ViewOf(*sampled, 1);
+    const auto* overflow = ViewOf(*sampled, 2);
+    if (first == nullptr || overflow == nullptr) {
+        Check(false, "same key: both batches drawn");
+        return;
+    }
+    const auto firstBytes = SampledBytes(*first), overflowBytes = SampledBytes(*overflow);
+    Check(Near(QuadOf(firstBytes, 0), Mix(a, grownA, 0.5F)) && Near(QuadOf(firstBytes, 1), Mix(b, grownB, 0.5F)) &&
+              Near(QuadOf(firstBytes, 2), d.Points()),
+          "same key: model[0] pairs with model[0]");
+    Check(Near(QuadOf(overflowBytes, 0), Mix(c, grownC, 0.5F)) && Near(QuadOf(overflowBytes, 1), e.Points()),
+          "same key: model[1] pairs with model[1], not with model[0] of the same quad count");
+    Check(sampled->Stats.Batches == 2 && sampled->Stats.Paired == 2 && sampled->Stats.CountChanged == 2,
+          "same key: counters batches 2, paired 2, count changed 2");
+}
+
+// The batch as the game draws it (0x003FB5EC): a triangle strip of six 16-bit indices per quad (the quad and two
+// degenerate joins, the last one past the quads), double-buffered, no native key. logs49 (0.2.5-test.5, lists
+// only): quad_batches=0 in all 109 windows. Re-sorted with a new quad, and re-sorted at the same count.
+void TestGameStrip() {
+    const Quad a{{0, -1, -50}, 10}, b{{100, -1, -80}, 20};
+    const Quad grownA{{0, -1, -50}, 11}, grownB{{100, -1, -80}, 21};
+    const Quad newC{{-200, -1, -70}, 5};
+    {
+        auto sampled = InBetween(Batch({a, b}, 5, {.Native = false, .Buffer = 0, .Strip = true}),
+                                 Batch({newC, grownB, grownA}, 15, {.Native = false, .Buffer = 1, .Strip = true}));
+        const auto* view = BatchView(*sampled);
+        const auto bytes = view != nullptr ? SampledBytes(*view) : std::span<const uint8_t>{};
+        Check(bytes.size() >= 3U * 4U * kStride && Near(QuadOf(bytes, 0), newC.Points()) &&
+                  Near(QuadOf(bytes, 1), Mix(b, grownB, 0.5F)) && Near(QuadOf(bytes, 2), Mix(a, grownA, 0.5F)),
+              "game strip, count changed: paired, quads by shape, the new one as it is");
+        Check(sampled->Stats.Batches == 1 && sampled->Stats.Paired == 1 && sampled->Stats.CountChanged == 1 &&
+                  sampled->Stats.UnmatchedNew == 1 && sampled->Stats.Dropped == 0,
+              "game strip, count changed: counters batches 1, paired 1, count changed 1, new 1");
+    }
+    {
+        auto sampled = InBetween(Batch({a, b}, 5, {.Native = false, .Buffer = 0, .Strip = true}),
+                                 Batch({grownB, grownA}, 15, {.Native = false, .Buffer = 1, .Strip = true}));
+        const auto* view = BatchView(*sampled);
+        const auto bytes = view != nullptr ? SampledBytes(*view) : std::span<const uint8_t>{};
+        Check(!bytes.empty() && Near(QuadOf(bytes, 0), Mix(b, grownB, 0.5F)) &&
+                  Near(QuadOf(bytes, 1), Mix(a, grownA, 0.5F)),
+              "game strip, same count re-sorted: quads by shape");
+        Check(sampled->Stats.Batches == 1 && sampled->Stats.Paired == 1 && sampled->Stats.Rematched == 2,
+              "game strip, same count: counters batches 1, paired 1, rematched 2");
+    }
+    // A strip whose joins reach past the neighbouring quads is not a quad batch.
+    {
+        auto far = Batch({a, b}, 5, {.Native = false, .Strip = true});
+        far.IndexBytes[2 * 5] = 40;  // quad 0's second join: vertex 40
+        auto sampled = InBetween(std::move(far), Batch({grownA, grownB}, 15, {.Native = false, .Strip = true}));
+        Check(sampled->Stats.Batches == 1, "a strip with a far join is not counted (only the current batch is)");
+    }
+}
+
+// Indexed lists and strips of 6n indices that are not taken as quad batches are counted by reason
+// (perf.txt quad_reject_*), so a log shows which rule the game's batches miss.
+void TestRejectReasons() {
+    const Quad a{{0, -1, -50}, 10}, b{{100, -1, -80}, 20};
+    const auto setIndex = [](Oot3dPicaVulkanDrawPlan& plan, size_t item, uint16_t value) {
+        plan.IndexBytes[item * 2U] = static_cast<uint8_t>(value);
+        plan.IndexBytes[item * 2U + 1U] = static_cast<uint8_t>(value >> 8U);
+    };
+    const auto stats = [&](Oot3dPicaVulkanDrawPlan current) {
+        return InBetween(Batch({a, b}, 5, {}), std::move(current))->Stats;
+    };
+    {
+        auto plan = Batch({a, b}, 15, {});
+        setIndex(plan, 5, 1);  // quad 0: 0 1 2 2 1 1, corner 3 missing
+        const auto s = stats(std::move(plan));
+        Check(s.RejectedCorners == 1 && s.Batches == 0, "reject: a quad without all four corners counts corners");
+    }
+    {
+        auto plan = Batch({a, b}, 15, {});
+        setIndex(plan, 11, 8);  // quad 1 of a list: an index outside 4..7
+        const auto s = stats(std::move(plan));
+        Check(s.RejectedJoin == 1 && s.Batches == 0, "reject: a list index outside its quad counts join");
+    }
+    {
+        auto plan = Batch({a, b}, 15, {.Strip = true});
+        setIndex(plan, 5, 40);  // quad 0's second join: vertex 40
+        const auto s = stats(std::move(plan));
+        Check(s.RejectedJoin == 1 && s.Batches == 0, "reject: a strip join past the neighbouring quads counts join");
+    }
+    {
+        std::vector<Quad> many(kOot3dPicaVisualQuadBatchMaximumQuads + 1U, a);
+        const auto s = stats(Batch(many, 15, {}));
+        Check(s.RejectedCap == 1 && s.Batches == 0, "reject: above the cap counts cap");
+    }
+    {
+        auto plan = Batch({a, b}, 15, {});
+        plan.IndexBytes.resize(plan.IndexBytes.size() - 2U);
+        const auto s = stats(std::move(plan));
+        Check(s.RejectedUnreadable == 1 && s.Batches == 0, "reject: short index bytes count unreadable");
+    }
+    {
+        // Taken, but no float input of three components and no hook: corners unreadable when pairing.
+        const auto flat = [](Oot3dPicaVulkanDrawPlan plan) {
+            plan.VertexAttributes.front().ComponentCount = 2;
+            return plan;
+        };
+        auto sampled = InBetween(flat(Batch({a, b}, 5, {.Hooked = false})),
+                                 flat(Batch({a, b, a}, 15, {.Hooked = false})));
+        Check(sampled->Stats.Batches == 1 && sampled->Stats.RejectedUnreadable == 1,
+              "reject: a taken batch without readable corners counts unreadable");
+    }
+    {
+        auto plan = Batch({a, b}, 15, {});
+        plan.VertexCount = 11;  // not a multiple of 6: not a candidate
+        const auto s = stats(std::move(plan));
+        Check(s.RejectedCorners + s.RejectedJoin + s.RejectedCap + s.RejectedUnreadable == 0 && s.Batches == 0,
+              "reject: draws that are not 6n-index lists or strips are not counted");
+    }
+    {
+        const auto s = stats(Batch({b, a}, 15, {}));
+        Check(s.RejectedCorners + s.RejectedJoin + s.RejectedCap + s.RejectedUnreadable == 0 && s.Batches == 1,
+              "reject: a taken batch counts no reason");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -356,6 +545,10 @@ int main() {
     TestTurnedCopy();
     TestUnchangedDraws();
     TestCap();
+    TestDoubleBuffered();
+    TestSameKeyBatchesInOrder();
+    TestGameStrip();
+    TestRejectReasons();
     std::printf("%s\n", gFailures == 0 ? "all ok" : "FAILED");
     return gFailures == 0 ? 0 : 1;
 }

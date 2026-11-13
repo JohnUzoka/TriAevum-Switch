@@ -2952,10 +2952,12 @@ GUARDS = [
           r'PairMatchedQuadBatch\(previousDraw, currentDraw, currentIndex, currentQuads, delta, \*quadPairing\);.*?'
           r'InterpolateQuadBatchVertices\(previousDraw, currentDraw, alpha, quadSources, quads,',
           "oot3d_native_pica_visual_quad_batch_tests"),
-    Guard("0.2.5-test.4 ripples: only quad lists up to 256 quads are paired by shape, and a batch whose quads kept "
-          "their slots keeps the old slot-wise blend (every other draw is sampled as before)",
+    Guard("0.2.5-test.4 ripples: only quad batches (lists, and since test.5 strips) up to 256 quads are paired by "
+          "shape, and a batch whose quads kept their slots keeps the old slot-wise blend (every other draw is "
+          "sampled as before)",
           "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
-          r'draw\.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads\).*?if \(corners != 0xFU\) return 0U;.*?'
+          r'if \(draw\.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads\) return QuadBatchVerdict::Cap;.*?'
+          r'if \(corners != 0xFU\) return QuadBatchVerdict::Corners;.*?'
           r'if \(result == VisualQuadPairing::Identity \|\| \(result == VisualQuadPairing::Unreadable && !countChanged\)\) \{\s*'
           r'pairing\.Sources\.resize\(first\);',
           "oot3d_native_pica_visual_quad_batch_tests (TestUnchangedDraws, TestCap)"),
@@ -2963,6 +2965,38 @@ GUARDS = [
           "(quad_batches, quad_paired, quad_count_changed, quad_rematched, quad_new, quad_dropped)",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
           r'" quad_batches=".*?" quad_dropped=".*?totals\.QuadDropped \+= quads\.Dropped;'),
+    # --- 11/13 (0.2.5-test.5, logs49): ripples still blinking, quad_batches=0 everywhere ---
+    Guard("water ripples still blinked at 60 FPS in 0.2.5-test.5 (logs49: quad_batches=0 in all 109 windows): the "
+          "game draws its effect quad batches as triangle strips (0x003FB5EC, GL mode 5 unless header flag 0x20: "
+          "each quad's 4 corners plus 2 degenerate joins) and the detection took only triangle lists",
+          "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
+          r'const bool strip = draw\.State\.Topology == Oot3dPicaPrimitiveTopology::TriangleStrip;.*?'
+          r'\} else if \(!strip \|\| corner < -4 \|\| corner > 7\) \{',
+          "oot3d_native_pica_visual_quad_batch_tests (TestGameStrip)"),
+    Guard("0.2.5-test.5 ripples: the effect quad batches are double-buffered (header flag 0x100, 0x00348C18; each "
+          "build writes the other buffer, 0x003FCB00) and have no native key, so the batch key across frames leaves "
+          "out the vertex count and every geometry address, batches of one key pair in draw order (model[0], then "
+          "the overflow model[1]), and that stage runs before the structural ones",
+          "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
+          r'if \(withGeometryBuffers\) HashValue\(hash, plan\.State\.VertexInput\.PhysicalBaseAddress\);.*?'
+          r'if \(withGeometryBuffers\) HashValue\(hash, loader\.PhysicalAddress\);.*?'
+          r'HashVisualDrawIdentity\(current\.Draws\[i\], false\).*?'
+          r'const size_t pairs = std::min\(before\.size\(\), after\.size\(\)\);.*?'
+          r'MatchEqualCardinalityGroups\(\s*previous, current, nullptr, scratch,\s*matching\.PreviousByCurrent, previousStructural',
+          "oot3d_native_pica_visual_quad_batch_tests (TestDoubleBuffered, TestSameKeyBatchesInOrder)"),
+    Guard("0.2.5-test.5 ripples: indexed lists and strips of 6n indices not taken as quad batches are counted by "
+          "reason (perf.txt quad_reject_corners/join/cap/unreadable) so a log shows which rule the game's batches "
+          "miss",
+          "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
+          r'if \(result == VisualQuadPairing::Unreadable\) \+\+stats\.RejectedUnreadable;.*?'
+          r'case QuadBatchVerdict::Cap: \+\+quadStats\.RejectedCap; break;\s*'
+          r'case QuadBatchVerdict::Unreadable: \+\+quadStats\.RejectedUnreadable; break;\s*'
+          r'case QuadBatchVerdict::Corners: \+\+quadStats\.RejectedCorners; break;\s*'
+          r'case QuadBatchVerdict::Join: \+\+quadStats\.RejectedJoin; break;',
+          "oot3d_native_pica_visual_quad_batch_tests (TestRejectReasons)"),
+    Guard("0.2.5-test.5 ripples: perf.txt interp: block writes the quad batch rejections per window",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
+          r'" quad_reject_corners=".*?" quad_reject_unreadable=".*?totals\.QuadRejectUnreadable \+= quads\.RejectedUnreadable;'),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

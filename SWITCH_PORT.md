@@ -1082,6 +1082,21 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   vanish or tint on alternate frames. In perf.txt there, `quad_batches` and `quad_paired` should be non-zero and
   `quad_count_changed` / `quad_rematched` should rise while wading. If `quad_batches` is non-zero but
   `quad_paired` stays 0, the batches did not pair (neither key matched) and the blink will remain.
+- **0.2.5-test.5 (logs49): still blinking.** Every `quad_*` counter was 0 in all 109 windows (45 at Zora's
+  Fountain), so no ripple batch was recognised. The game draws a batch (0x003FB5EC) as a **triangle strip**
+  (GL mode 5; mode 4, a list, only with header flag 0x20) of six 16-bit indices per quad: its corners and two
+  degenerate joins. The batch is **double-buffered** (header flag 0x100: two vertex and index buffers,
+  0x00348C18; each build writes the other, 0x003FCB00), so all its geometry addresses alternate every frame.
+  It has no native key (drawn outside the hooked CMB submit 0x0030F4D0).
+- **Fix 2:** a quad batch may be a strip: each group of six holds 4q..4q+3, and the two joins lie within the
+  neighbouring quads. The key that pairs batches across frames leaves out the vertex count and every geometry
+  address. Batches of one key pair in draw order (an effect type's model[0], then its overflow model[1]), in a
+  stage before the structural ones so equal quad counts cannot cross-pair them.
+- **Test:** `oot3d_native_pica_visual_quad_batch_tests` (TestGameStrip, TestDoubleBuffered,
+  TestSameKeyBatchesInOrder, TestRejectReasons).
+- **perf.txt:** `quad_reject_corners quad_reject_join quad_reject_cap quad_reject_unreadable`, window totals of
+  indexed lists and strips of 6n indices not taken as quad batches (or taken but without readable corners).
+  If `quad_batches` is still 0, the `quad_reject_*` field that rises names the rule the game's batches miss.
 
 ### Ocarina song menu over the notes being played (user, 11/13)
 - **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we

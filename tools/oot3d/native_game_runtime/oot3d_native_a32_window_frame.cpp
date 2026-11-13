@@ -1897,7 +1897,12 @@ bool NativeA32WindowSession::RunFrame() {
                << " quad_count_changed=" << (now.QuadCountChanged - before.QuadCountChanged)
                << " quad_rematched=" << (now.QuadRematched - before.QuadRematched)
                << " quad_new=" << (now.QuadNew - before.QuadNew)
-               << " quad_dropped=" << (now.QuadDropped - before.QuadDropped);
+               << " quad_dropped=" << (now.QuadDropped - before.QuadDropped)
+               // Indexed lists/strips of 6n indices not taken, by reason.
+               << " quad_reject_corners=" << (now.QuadRejectCorners - before.QuadRejectCorners)
+               << " quad_reject_join=" << (now.QuadRejectJoin - before.QuadRejectJoin)
+               << " quad_reject_cap=" << (now.QuadRejectCap - before.QuadRejectCap)
+               << " quad_reject_unreadable=" << (now.QuadRejectUnreadable - before.QuadRejectUnreadable);
         }
         perf << " est_step_ms=" << current.StepCostMs
              << " est_full_ms=" << current.FullEstimateMs
@@ -4419,6 +4424,10 @@ void NativeA32WindowSession::PresentVisualFrame(
                   totals.QuadRematched += quads.Rematched;
                   totals.QuadNew += quads.UnmatchedNew;
                   totals.QuadDropped += quads.Dropped;
+                  totals.QuadRejectCorners += quads.RejectedCorners;
+                  totals.QuadRejectJoin += quads.RejectedJoin;
+                  totals.QuadRejectCap += quads.RejectedCap;
+                  totals.QuadRejectUnreadable += quads.RejectedUnreadable;
                 }
                 if (launch.ExtendedDiagnostics) {
                   if (visualTransitionEvents.size() == 1024U) {

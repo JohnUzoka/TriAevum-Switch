@@ -264,6 +264,13 @@ struct Oot3dPicaVisualQuadBatchStats {
     size_t Rematched = 0;     // quads blended from another slot
     size_t UnmatchedNew = 0;  // quads of paired batches drawn as they are
     size_t Dropped = 0;       // previous quads of paired batches left out
+    // Indexed lists and strips of 6n indices not taken as quad batches, by
+    // reason (current frame), and taken batches whose corners could not be
+    // read when pairing.
+    size_t RejectedCorners = 0;     // a group of six without all four quad vertices
+    size_t RejectedJoin = 0;        // an index outside its quad (list) or past its neighbours (strip)
+    size_t RejectedCap = 0;         // above kOot3dPicaVisualQuadBatchMaximumQuads quads
+    size_t RejectedUnreadable = 0;  // short index bytes, or no readable corner positions
 };
 
 // Draw matching and transition analysis are immutable for a pair of source
