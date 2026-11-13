@@ -132,24 +132,64 @@ void TestDecal() {
   Require(back && Near(*back, point, 1.0e-2F), "decal: a pixel's depth gives back its world point");
 
   const float lift = kPlayerShadowLift;
-  const auto head = PlayerShadowDecalLookup(*decal, {-(50.0F - lift), 0.0F, 0.0F});
+  const Vec3 up{0.0F, 1.0F, 0.0F};
+  const Vec3 side{1.0F, 0.0F, 0.0F};
+  const auto head = PlayerShadowDecalLookup(*decal, {-(50.0F - lift), 0.0F, 0.0F}, up);
   Require(head.has_value() && head->Strength > 0.9F, "decal: the floor where his head's shadow falls");
-  const auto step = PlayerShadowDecalLookup(*decal, {-30.0F, 20.0F, 0.0F});
+  const auto step = PlayerShadowDecalLookup(*decal, {-30.0F, 20.0F, 0.0F}, up);
   Require(step.has_value(), "decal: a step behind him takes the shadow");
-  const auto wall = PlayerShadowDecalLookup(*decal, {-40.0F, 30.0F, 0.0F});
+  const auto wall = PlayerShadowDecalLookup(*decal, {-40.0F, 30.0F, 0.0F}, side);
   Require(wall.has_value(), "decal: a wall behind him takes the shadow");
   // The step at 20 and the floor under the same flattened point read the same texel.
-  const auto stepFloor = PlayerShadowDecalLookup(*decal, {-30.0F - 20.0F, 0.0F, 0.0F});
+  const auto stepFloor = PlayerShadowDecalLookup(*decal, {-30.0F - 20.0F, 0.0F, 0.0F}, up);
   Require(stepFloor && Near(step->Uv[0], stepFloor->Uv[0], 1.0e-3F) && Near(step->Uv[1], stepFloor->Uv[1], 1.0e-3F),
           "decal: a raised point reads the silhouette where the light takes it to the plane");
-  Require(!PlayerShadowDecalLookup(*decal, {30.0F, 20.0F, 0.0F}), "decal: nothing between him and the light");
-  Require(!PlayerShadowDecalLookup(*decal, {2.0F, 30.0F, 1.0F}), "decal: not on Link himself");
-  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow - 5.0F, 0.0F}),
+  Require(!PlayerShadowDecalLookup(*decal, {30.0F, 20.0F, 0.0F}, up), "decal: nothing between him and the light");
+  Require(!PlayerShadowDecalLookup(*decal, {2.0F, 30.0F, 1.0F}, side), "decal: not on Link himself");
+  Require(!PlayerShadowDecalLookup(*decal, {2.0F, 30.0F, 1.0F}, up), "decal: not on his up-facing parts either");
+  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow - 5.0F, 0.0F}, up),
           "decal: nothing below the range (past a ledge)");
-  Require(!PlayerShadowDecalLookup(*decal, {-60.0F, kPlayerShadowDecalAbove + 5.0F, 0.0F}),
+  Require(!PlayerShadowDecalLookup(*decal, {-60.0F, kPlayerShadowDecalAbove + 5.0F, 0.0F}, side),
           "decal: nothing above the range");
-  const auto low = PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow + lift + 2.0F, 0.0F});
+  const auto low = PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow + lift + 2.0F, 0.0F}, up);
   Require(low && low->Strength < 0.5F, "decal: it fades at the range's ends");
+
+  // 0.2.4 (user, his treehouse balcony): the planks are drawn 1.08 above the
+  // collision floor he stands on; within his cylinder they took no shadow, so
+  // it was cut around his feet with a round edge.
+  const Vec3 plank{-10.0F, 1.08F, 0.0F};
+  const auto balcony = PlayerShadowDecalLookup(*decal, plank, up);
+  Require(balcony && balcony->Strength > 0.9F, "decal: the balcony's planks near his feet take the shadow");
+  // The floor under the same flattened point (along the light from 1.08 up to 0).
+  const auto under = PlayerShadowDecalLookup(*decal, {plank[0] - plank[1], 0.0F, 0.0F}, up);
+  Require(balcony && under && Near(balcony->Uv[0], under->Uv[0], 1.0e-3F) && Near(balcony->Uv[1], under->Uv[1], 1.0e-3F),
+          "decal: the planks read the silhouette where the light takes them to the plane");
+  Require(PlayerShadowDecalLookup(*decal, plank, {0.0F, -2.0F, 0.3F}).has_value(),
+          "decal: a floor's facing, either sign and any length");
+  Require(!PlayerShadowDecalLookup(*decal, plank, side), "decal: his boots, upright there, take none");
+  Require(!PlayerShadowDecalLookup(*decal, plank, {0.6F, 0.8F, 0.0F}), "decal: nor a surface tilted 37 degrees");
+  Require(!PlayerShadowDecalLookup(*decal, plank, {0.0F, 0.0F, 0.0F}), "decal: no facing is not a floor");
+  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, kPlayerShadowDecalFloorRelief + 0.5F, 0.0F}, up),
+          "decal: above the raised floor's height, up-facing parts are his");
+  Require(PlayerShadowDecalLookup(*decal, {-10.0F, 0.5F, 0.0F}, side).has_value(),
+          "decal: under 1 above his position, anything is the floor, as before");
+
+  // The shader's facing: the next pixels' points, from their NDC and depth.
+  const auto pixel = [&](const Vec3 &world) {
+    const auto c = Apply4(worldToClip, world);
+    return Vec3{c[0] / c[3], c[1] / c[3], -c[2] / c[3]};
+  };
+  const Vec3 beside{-8.0F, 1.08F, -6.0F};
+  const auto plankFacing =
+      PlayerShadowDecalFacing(*decal, pixel(beside), pixel({beside[0] + 0.3F, beside[1], beside[2]}),
+                              pixel({beside[0], beside[1], beside[2] + 0.3F}));
+  Require(plankFacing && PlayerShadowDecalLookup(*decal, beside, *plankFacing).has_value(),
+          "decal: the planks' points around a pixel face up: they take the shadow");
+  const auto bootFacing =
+      PlayerShadowDecalFacing(*decal, pixel(beside), pixel({beside[0], beside[1] + 0.3F, beside[2]}),
+                              pixel({beside[0], beside[1], beside[2] + 0.3F}));
+  Require(bootFacing && !PlayerShadowDecalLookup(*decal, beside, *bootFacing).has_value(),
+          "decal: an upright surface there is his: none");
 }
 
 void TestProjection() {
@@ -318,18 +358,18 @@ void TestScreenRect() {
   const auto region = PlayerShadowFloorRegion(frame, {0.0F, 1.0F, 0.0F});
   Require(region.has_value(), "a region");
   // Seen from above: x and z over 128 units to NDC x and y, w = 1. The
-  // region's x -60..60 makes columns 116.25..303.75, its z -28..92 NDC y
-  // -0.21875..0.71875.
+  // region's x -45..45 (kPlayerShadowBodyRadius) makes columns
+  // 139.6875..280.3125, its z -13..77 NDC y -0.1015625..0.6015625.
   Mat4 topDown{};
   topDown[0] = 1.0F / 128.0F;
   topDown[6] = 1.0F / 128.0F;
   topDown[15] = 1.0F;
   const std::array<float, 4> viewport{10.0F, 20.0F, 400.0F, 240.0F};
   const auto firstRow = PlayerShadowScreenRect(topDown, *region, viewport, true);
-  Require(firstRow && *firstRow == std::array<int32_t, 4>{115, 112, 190, 116},
+  Require(firstRow && *firstRow == std::array<int32_t, 4>{138, 126, 144, 88},
           "NDC -1 on the viewport's first row, a pixel of margin");
   const auto lastRow = PlayerShadowScreenRect(topDown, *region, viewport, false);
-  Require(lastRow && *lastRow == std::array<int32_t, 4>{115, 52, 190, 116}, "NDC -1 on its last row");
+  Require(lastRow && *lastRow == std::array<int32_t, 4>{138, 66, 144, 88}, "NDC -1 on its last row");
   Mat4 perspective = topDown;
   perspective[14] = -1.0F; // w = -z: the region crosses the camera's plane
   perspective[15] = 0.0F;

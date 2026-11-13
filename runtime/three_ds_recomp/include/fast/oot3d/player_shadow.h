@@ -500,6 +500,21 @@ inline constexpr float kPlayerShadowDecalLinkRadius = 18.0F; // his body, not a 
 inline constexpr float kPlayerShadowDecalLinkTall = 80.0F;
 inline constexpr float kPlayerShadowDecalLinkMiddle = 25.0F;   // above his position
 inline constexpr float kPlayerShadowDecalFade = 10.0F;         // units at the height range's ends
+// The floor he stands on is drawn a little above the collision floor the game
+// gives (his position): the planks of his treehouse balcony in Kokiri Forest
+// are 1.08 above it (spot04 room 0 at y 101.08, its collision at 100), so his
+// cylinder from 1 up took them for his body and cut the shadow around his feet
+// with its round edge (user, 0.2.4 "under the floor"; 0.2.5-test.3 at Zora's
+// Fountain "a circle around Link's feet masking a part of the shadow"). Within
+// the cylinder, a receiver lower than this whose surface faces along the floor
+// normal (cosine at least kPlayerShadowDecalFloorFacing) is that floor. RomFS
+// survey (depth-writing room meshes against the collision, a disc of 18 around
+// points of the floor): the share of it taken for his body falls from 8.8% to
+// 2.8% in Kokiri Forest, 19% to 3.2% in Kakariko, 20% to 5.1% in the Lost
+// Woods, 3.6% to 0.5% at Zora's Fountain, most of it by 4. His body there is
+// upright; only the tops of his toes face up (they take his shadow now).
+inline constexpr float kPlayerShadowDecalFloorRelief = 6.0F;
+inline constexpr float kPlayerShadowDecalFloorFacing = 0.9F;
 // The receivers' height range above the plane: a step down this deep, a wall
 // this high (his head is about 50 up). Its box sets the screen rectangle.
 inline constexpr float kPlayerShadowDecalBelow = 45.0F;
@@ -557,15 +572,42 @@ struct PlayerShadowDecal {
     return std::array<float, 3>{world[0] / world[3], world[1] / world[3], world[2] / world[3]};
 }
 
+// A receiver's surface (not unit, either sign) from its pixel and the next
+// pixels across and down, each (NDC x, NDC y, depth): the shader takes their
+// depths along its scene depth's screen derivatives (exact on a plane, whose
+// depth is linear across the screen). Nothing when a point is at infinity.
+[[nodiscard]] inline std::optional<std::array<float, 3>> PlayerShadowDecalFacing(
+    const PlayerShadowDecal& decal, const std::array<float, 3>& here, const std::array<float, 3>& across,
+    const std::array<float, 3>& down) noexcept {
+    using namespace PlayerShadowDetail;
+    const auto p = PlayerShadowDecalWorldPoint(decal, here[0], here[1], here[2]);
+    const auto a = PlayerShadowDecalWorldPoint(decal, across[0], across[1], across[2]);
+    const auto b = PlayerShadowDecalWorldPoint(decal, down[0], down[1], down[2]);
+    if (!p || !a || !b) return std::nullopt;
+    return Cross(Vec3{(*a)[0] - (*p)[0], (*a)[1] - (*p)[1], (*a)[2] - (*p)[2]},
+                 Vec3{(*b)[0] - (*p)[0], (*b)[1] - (*p)[1], (*b)[2] - (*p)[2]});
+}
+
 // Where a scene point falls in the silhouette (u along, v across, 0..1 in
 // the region, before the floor quad's row flip) and how strongly (the fade at
-// the height range's ends), or nothing when it takes no shadow.
+// the height range's ends), or nothing when it takes no shadow. `facing`: the
+// point's surface normal, any length or sign (PlayerShadowDecalFacing); zero
+// or not finite is not a floor.
 struct PlayerShadowDecalHit {
     std::array<float, 2> Uv{};
     float Strength = 1.0F;
 };
+// Within his cylinder: the floor drawn above the ground under him, not his body.
+[[nodiscard]] inline bool PlayerShadowDecalRaisedFloor(const std::array<float, 3>& normal,
+                                                       const std::array<float, 3>& facing, float up) noexcept {
+    using namespace PlayerShadowDetail;
+    const float along = Dot(facing, normal);
+    const float length = Dot(facing, facing);
+    return up < kPlayerShadowDecalFloorRelief && length > 0.0F &&
+           along * along >= kPlayerShadowDecalFloorFacing * kPlayerShadowDecalFloorFacing * length;
+}
 [[nodiscard]] inline std::optional<PlayerShadowDecalHit> PlayerShadowDecalLookup(
-    const PlayerShadowDecal& decal, const std::array<float, 3>& point) noexcept {
+    const PlayerShadowDecal& decal, const std::array<float, 3>& point, const std::array<float, 3>& facing) noexcept {
     using namespace PlayerShadowDetail;
     const Vec3 relative{point[0] - decal.Origin[0], point[1] - decal.Origin[1], point[2] - decal.Origin[2]};
     const float height = Dot(relative, decal.Normal);
@@ -577,7 +619,7 @@ struct PlayerShadowDecalHit {
     const Vec3 sideways{fromLink[0] - up * decal.Normal[0], fromLink[1] - up * decal.Normal[1],
                         fromLink[2] - up * decal.Normal[2]};
     if (Dot(sideways, sideways) < kPlayerShadowDecalLinkRadius * kPlayerShadowDecalLinkRadius && up > 1.0F &&
-        up < kPlayerShadowDecalLinkTall)
+        up < kPlayerShadowDecalLinkTall && !PlayerShadowDecalRaisedFloor(decal.Normal, facing, up))
         return std::nullopt; // Link himself
     const float along = height / decal.Rise;
     const Vec3 flat{relative[0] - decal.TowardLight[0] * along, relative[1] - decal.TowardLight[1] * along,

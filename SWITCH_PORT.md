@@ -1004,6 +1004,27 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Test:** `oot3d_simple_shadow_tests` (TestConfig: absent and empty = on, `off` = off, on removes the
   file), `oot3d_gameplay_options_log_tests`; guard "Simple shadow: on by default since 0.2.4 ...".
 
+### Simple shadow: a circle around Link's feet had none (user, 0.2.4 and 0.2.5-test.3, 11/13)
+- **Seen:** on his treehouse balcony part of the shadow went "under the floor" (photo 2026111303360700:
+  lit planks next to his boots, the shadow starting about 16 units away with a sharp curved corner); at
+  Zora's Fountain (0.2.5-test.3, clip 2026111314261700 at 2 and 7 s) "a circle around Link's feet masking
+  a part of the shadow".
+- **Cause:** the decal keeps off Link himself with a cylinder of radius 18 from 1 to 80 above his
+  position, which is the collision floor the game gives. The floor is drawn a little above it: his
+  balcony's planks at y 101.08, its collision at 100 (spot04 room 0 against spot04_info.zsi). Within 18
+  units of him the planks counted as his body. RomFS survey (depth-writing room meshes, a disc of 18 around
+  points of the floor): 8.8% of it lost in Kokiri Forest, 19% in Kakariko, 20% in the Lost Woods, 3.6% at
+  Zora's Fountain. The 0.2.4 draw-point change (after the translucent world) did not touch this.
+- **Fix:** in the cylinder a receiver up to 6 above his position whose surface faces along the floor
+  normal (cosine 0.9) is that floor (`PlayerShadowDecalRaisedFloor`): 2.8%, 3.2%, 5.1%, 0.5% left. The
+  shader takes the surface from the next pixels' world points, their depths along the scene depth's screen
+  derivatives (`PlayerShadowDecalFacing`, exact on a plane); every pixel pays two derivatives, only the
+  cylinder's pixels the two points (DKSH 2048 -> 3328 B; cost not measured, expected well under 0.1 ms).
+  His upright body still takes none; the tops of his toes now take his shadow.
+- **Test:** `oot3d_player_shadow_tests` (TestDecal: the balcony's planks at 1.08, upright and tilted
+  surfaces there, the facing from neighbouring pixels); its TestScreenRect expectations follow the radius 45.
+  Console check: the balcony and the Zora's Fountain ledge, the shadow reaching his boots; `shadow_decal_ms`.
+
 ### Ocarina song menu over the notes being played (user, 11/13)
 - **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we
   should have one or the other". In the clip the menu's white preview notes and the notes the

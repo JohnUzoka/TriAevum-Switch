@@ -2900,6 +2900,18 @@ GUARDS = [
           r'add\("gameplay_options", std::array\{kN64IdleAnimationsHookPc\}\);.*?'
           r'std::vector<uint32_t> Oot3dGameplayOptionBlockPcs\(\) \{[^}]*kN64IdleAnimationsHookPc, kN64IdleAnimationsResumePc\}',
           "oot3d_native_block_entry_hooks_tests, whole_aot_hook_gates_census"),
+    Guard("0.2.4/0.2.5-test.3 (user): a circle around Link's feet masked the shadow: the floor drawn up to "
+          "6 above the collision floor (his balcony's planks 1.08) fell in his 'not Link' cylinder; an "
+          "up-facing receiver there is the floor",
+          "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
+          r'float depth_dx = dFdx\(depth\);\s+float depth_dy = dFdy\(depth\);\s+if \(depth >= 1\.0\) discard;.*?'
+          r'dot\(sideways, sideways\) < link\.w \* link\.w &&\s+!raised_floor\(p, up, vec2\(x, y\), depth, depth_dx, depth_dy\) && up > 1\.0 && up < middle\.w\) discard;',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("the decal's raised floor: its height and facing reach the shader",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
+          r'put\(block\.TowardLight, decal->TowardLight, Oot3d::kPlayerShadowDecalFloorFacing\);.*?'
+          r'block\.Shade\[3\] = Oot3d::kPlayerShadowDecalFloorRelief;',
+          "oot3d_player_shadow_tests (TestDecal)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

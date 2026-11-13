@@ -40,13 +40,13 @@ struct PlayerShadowDecalUniforms {
     float Viewport[4];
     float Origin[4];       // w: 1 when NDC y = -1 is the viewport's first row
     float Normal[4];       // w: toward light . normal
-    float TowardLight[4];
+    float TowardLight[4];  // w: the cosine a raised floor faces the normal within
     float Along[4];        // w: first along
     float Across[4];       // w: first across
     float Extent[4];       // 1 / along length, 1 / across length, lowest, highest
     float Link[4];         // w: his radius
     float Middle[4];       // w: his height
-    float Shade[4];        // opacity, one texel, the fade's length
+    float Shade[4];        // opacity, one texel, the fade's length, the raised floor's height
 };
 static_assert(sizeof(PlayerShadowDecalUniforms) == 224U, "the std140 block PlayerShadowDecal");
 
@@ -325,7 +325,7 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     };
     put(block.Origin, decal->Origin, minusOneFirst ? 1.0F : 0.0F);
     put(block.Normal, decal->Normal, decal->Rise);
-    put(block.TowardLight, decal->TowardLight, 0.0F);
+    put(block.TowardLight, decal->TowardLight, Oot3d::kPlayerShadowDecalFloorFacing);
     put(block.Along, decal->Along, decal->AlongRange[0]);
     put(block.Across, decal->Across, decal->AcrossRange[0]);
     block.Extent[0] = 1.0F / (decal->AlongRange[1] - decal->AlongRange[0]);
@@ -337,6 +337,7 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     block.Shade[0] = opacity;
     block.Shade[1] = 1.0F / static_cast<float>(kPlayerShadowSilhouetteSize);
     block.Shade[2] = Oot3d::kPlayerShadowDecalFade;
+    block.Shade[3] = Oot3d::kPlayerShadowDecalFloorRelief;
     const uint32_t blockBytes = AlignUp(static_cast<uint32_t>(sizeof(block)), DK_UNIFORM_BUF_ALIGNMENT);
     const StreamSpan uniforms = mDevice.Stream(blockBytes, DK_UNIFORM_BUF_ALIGNMENT);
     if (uniforms.Cpu == nullptr) return;

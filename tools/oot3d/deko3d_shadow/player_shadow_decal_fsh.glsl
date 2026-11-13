@@ -5,27 +5,47 @@
 // (PlayerShadowDecalWorldPoint), goes along the light into the silhouette and
 // darkens by it, under the rules of PlayerShadowDecalLookup (player_shadow.h):
 // only within the region's height range, not between Link and the light, not
-// Link himself. Four bilinear taps soften the edge, more away from his feet.
+// Link himself, unless it is the floor drawn a little above the ground under
+// him. Four bilinear taps soften the edge, more away from his feet.
 layout(std140, binding = 0) uniform PlayerShadowDecal {
     mat4 clip_to_world;  // world = clip_to_world * (ndc x, ndc y, -depth, 1), then / w
     vec4 viewport;       // x, y, width, height of Link's draws (target pixels)
     vec4 origin;         // xyz: the shadow plane's origin; w: 1 when NDC y = -1 is the viewport's first row
     vec4 normal;         // xyz: the floor's normal; w: toward_light . normal
-    vec4 toward_light;   // xyz
+    vec4 toward_light;   // xyz; w: the cosine a raised floor faces the normal within
     vec4 along;          // xyz; w: the region's first along
     vec4 across;         // xyz; w: the region's first across
     vec4 extent;         // x: 1 / along length, y: 1 / across length, z: lowest height, w: highest
     vec4 link;           // xyz: Link's position; w: his radius
     vec4 middle;         // xyz: his middle; w: his height
-    vec4 shade;          // x: opacity, y: one silhouette texel, z: the fade's length
+    vec4 shade;          // x: opacity, y: one silhouette texel, z: the fade's length, w: the raised floor's height
 };
 layout(binding = 0) uniform sampler2D silhouette;
 layout(binding = 1) uniform sampler2D scene_depth;
 
 layout(location = 0) out vec4 shadow_out_color;
 
+// PlayerShadowDecalRaisedFloor with PlayerShadowDecalFacing: within Link's
+// cylinder, a receiver up to shade.w above his position whose surface (from
+// the next pixels' world points, their depths along the scene depth's
+// derivatives) faces along the floor normal is the floor drawn above the
+// ground under him, not his body. Only pixels in the cylinder pay for it.
+bool raised_floor(vec3 p, float up, vec2 ndc, float depth, float depth_dx, float depth_dy) {
+    if (up <= 1.0 || up >= shade.w) return false;
+    vec2 step = vec2(2.0 / viewport.z, (origin.w > 0.5 ? 2.0 : -2.0) / viewport.w);
+    vec4 next_across = clip_to_world * vec4(ndc.x + step.x, ndc.y, -(depth + depth_dx), 1.0);
+    vec4 next_down = clip_to_world * vec4(ndc.x, ndc.y + step.y, -(depth + depth_dy), 1.0);
+    vec3 facing = cross(next_across.xyz / next_across.w - p, next_down.xyz / next_down.w - p);
+    float facing_along = dot(facing, normal.xyz);
+    float facing_length = dot(facing, facing);
+    return facing_length > 0.0 && facing_along * facing_along >= toward_light.w * toward_light.w * facing_length;
+}
+
 void main() {
     float depth = texelFetch(scene_depth, ivec2(gl_FragCoord.xy), 0).r;
+    // Before any discard: derivatives need the whole 2x2 quad.
+    float depth_dx = dFdx(depth);
+    float depth_dy = dFdy(depth);
     if (depth >= 1.0) discard;
     float x = (gl_FragCoord.x - viewport.x) / viewport.z * 2.0 - 1.0;
     float row = (gl_FragCoord.y - viewport.y) / viewport.w * 2.0;
@@ -41,7 +61,8 @@ void main() {
     vec3 from_link = p - link.xyz;
     float up = dot(from_link, normal.xyz);
     vec3 sideways = from_link - normal.xyz * up;
-    if (dot(sideways, sideways) < link.w * link.w && up > 1.0 && up < middle.w) discard;
+    if (dot(sideways, sideways) < link.w * link.w &&
+        !raised_floor(p, up, vec2(x, y), depth, depth_dx, depth_dy) && up > 1.0 && up < middle.w) discard;
 
     vec3 flat_point = relative - toward_light.xyz * (height / normal.w);
     vec2 uv = vec2((dot(flat_point, along.xyz) - along.w) * extent.x,
