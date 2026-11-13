@@ -1,9 +1,9 @@
 #pragma once
 
 // L3+R3 > Video > "Simple shadow" (config/simple_shadow, present = on; off by
-// default; deko3d only), with "Shadow method" (config/simple_shadow_method,
-// how the renderer draws it) and "Shadow in cutscenes"
-// (config/simple_shadow_cutscenes, present = on).
+// default; deko3d only, drawn as a decal on the ground and walls), with
+// "Shadow in cutscenes" (config/simple_shadow_cutscenes, present = on). A
+// config/simple_shadow_method left by 0.2.3 is not read.
 //
 // Link's shadow is Player_DrawFeetShadow (EUR 0x00297E04), called by
 // Actor_Draw through shape.shadowDraw (0x002D6498, back at 0x002D649C): unless
@@ -71,9 +71,6 @@ inline std::atomic<bool> &SimpleShadowCutscenes() noexcept {
 
 inline constexpr const char *kSimpleShadowConfigName = "simple_shadow";
 inline constexpr const char *kSimpleShadowCutscenesConfigName = "simple_shadow_cutscenes";
-// The method's word (Fast::Oot3d::PlayerShadowMethodWord); no file: the
-// default (Fast::Oot3d::kPlayerShadowDefaultMethod, mark then cover).
-inline constexpr const char *kSimpleShadowMethodConfigName = "simple_shadow_method";
 
 // config/simple_shadow and config/simple_shadow_cutscenes: present = on.
 inline bool ReadSimpleShadowFlag(const std::filesystem::path &config, const char *name) {
@@ -90,24 +87,6 @@ inline bool SaveSimpleShadowFlag(const std::filesystem::path &config, const char
   }
   std::filesystem::create_directories(config, error);
   std::ofstream file(config / name, std::ios::trunc);
-  return static_cast<bool>(file);
-}
-
-inline Fast::Oot3d::PlayerShadowMethod ReadSimpleShadowMethod(const std::filesystem::path &config) {
-  std::ifstream file(config / kSimpleShadowMethodConfigName);
-  std::string text;
-  if (!file || !std::getline(file, text)) return Fast::Oot3d::kPlayerShadowDefaultMethod;
-  return Fast::Oot3d::ParsePlayerShadowMethod(text);
-}
-
-// Writes the method's word, or removes the file for the default; false if that failed.
-inline bool SaveSimpleShadowMethod(const std::filesystem::path &config, Fast::Oot3d::PlayerShadowMethod method) {
-  if (method == Fast::Oot3d::kPlayerShadowDefaultMethod)
-    return SaveSimpleShadowFlag(config, kSimpleShadowMethodConfigName, false);
-  std::error_code error;
-  std::filesystem::create_directories(config, error);
-  std::ofstream file(config / kSimpleShadowMethodConfigName, std::ios::trunc);
-  file << Fast::Oot3d::PlayerShadowMethodWord(method) << '\n';
   return static_cast<bool>(file);
 }
 

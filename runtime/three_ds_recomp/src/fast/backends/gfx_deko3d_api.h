@@ -425,14 +425,13 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
     void DrawGrass(const Deko3d::PicaTargetKey& key, Deko3d::PicaTarget& target, Oot3d::GrassDrawPoint point);
 
     // config/simple_shadow (gfx_deko3d_player_shadow.cpp): Link's opaque draws
-    // of the frame, drawn again flattened onto the floor at the frame's first
-    // draw point after them (the grass's points), the way
-    // config/simple_shadow_method says.
+    // of the frame, drawn again flattened into a silhouette, which a decal
+    // casts on the scene at the frame's overlay point (or before a copy reads
+    // the target).
     struct PlayerShadowDraw {
         const Deko3d::PicaTarget* Target = nullptr; // the frame's draws may go to several
         const DkShader* Vertex = nullptr;
-        DkGpuAddr Uniforms = DK_GPU_ADDR_INVALID; // his uniforms with the flattening view rows
-        // Method texture: the same with the silhouette's projection rows.
+        // His uniforms with the flattening view rows and the silhouette's projection rows.
         DkGpuAddr SilhouetteUniforms = DK_GPU_ADDR_INVALID;
         uint32_t UniformBytes = 0;
         std::array<DkVtxAttribState, Deko3d::kPicaVertexAttributeCount> Attributes{};
@@ -450,14 +449,12 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         uint8_t DepthCompare = 0;
     };
     struct PlayerShadowState {
-        // Of Selected, Method, Projection, Region, WorldToClip, Draws and StencilTaken.
+        // Of Selected, Projection, Region, WorldToClip, Light and Draws.
         uint64_t Frame = ~uint64_t{0};
         std::optional<Oot3d::PlayerShadowFrame> Selected;
-        // The bridge's, at the frame's first draw.
-        Oot3d::PlayerShadowMethod Method = Oot3d::PlayerShadowMethod::TwoPass;
         // One light and floor for all of the frame's meshes (taken at its first).
         std::optional<std::array<float, 16>> Projection;
-        // Methods cover and texture: the floor region and the camera of his first draw.
+        // The floor region and the camera of his first draw.
         std::optional<Oot3d::PlayerShadowRegion> Region;
         std::optional<std::array<float, 16>> WorldToClip;
         std::optional<std::array<float, 3>> Light; // toward it, as Projection took it
@@ -467,24 +464,12 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         double EasedLightTime = 0.0;
         uint32_t EasedLightActor = 0;
         std::vector<PlayerShadowDraw> Draws;
-        // A draw of the frame tests or writes the top stencil bit, which two
-        // passes and cover borrow: that frame they draw in one pass.
-        bool StencilTaken = false;
-        // Whether that bit can be set outside the shadow. Targets start with
-        // it zero and the shadow's second pass leaves it so; once a game draw
-        // uses it or a savestate restores stencil, a pass clears it over its
-        // whole target once, and the target counts as clean again.
-        bool StencilShared = false;
-        std::unordered_set<const Deko3d::PicaTarget*> StencilClean; // since the last share
-        uint64_t FullClears = 0;
-        const DkShader* Fragment = nullptr;
-        const DkShader* CoverVertex = nullptr; // method cover
-        const DkShader* FloorVertex = nullptr; // method texture
-        const DkShader* FloorFragment = nullptr;
-        const DkShader* DecalFragment = nullptr; // method decal (the cover triangle's vertex stage)
-        // Method decal: a texture slot per target (PicaTarget::Id) viewing its depth.
+        const DkShader* Fragment = nullptr;      // the silhouette's
+        const DkShader* CoverVertex = nullptr;   // one triangle over the viewport
+        const DkShader* DecalFragment = nullptr; // player_shadow_decal_fsh.glsl
+        // A texture slot per target (PicaTarget::Id) viewing its depth.
         std::unordered_map<uint64_t, uint32_t> DepthSlots;
-        // Method texture: the silhouette, drawn and then sampled at each draw point.
+        // The silhouette, drawn and then sampled at each draw point.
         DkMemBlock SilhouetteMemory = nullptr;
         DkImage SilhouetteImage{};
         DkImageView SilhouetteView{};
@@ -493,8 +478,8 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         uint64_t Frames = 0;
         uint64_t Meshes = 0;
         uint64_t Skipped = 0;
-        uint64_t StencilFrames = 0;
-        std::array<uint64_t, Oot3d::kPlayerShadowMethodCount> MethodFrames{}; // drawn with each method
+        uint64_t Unavailable = 0; // frames with his draws but no decal (no region, camera or depth slot)
+        uint64_t Pixels = 0;      // of the decal's rectangles
     };
     PlayerShadowState mPlayerShadow;
     // InitPica: the programs and the silhouette, and the bridge told whether

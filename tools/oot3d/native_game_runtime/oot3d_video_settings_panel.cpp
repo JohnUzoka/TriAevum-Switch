@@ -79,7 +79,6 @@ public:
     SimpleShadowEnabled().store(ReadSimpleShadowFlag(mConfig, kSimpleShadowConfigName), std::memory_order_relaxed);
     SimpleShadowCutscenes().store(ReadSimpleShadowFlag(mConfig, kSimpleShadowCutscenesConfigName),
                                   std::memory_order_relaxed);
-    Fast::Oot3d::PlayerShadowBridge::Instance().SetMethod(ReadSimpleShadowMethod(mConfig));
 #endif
     // config/cpu_performance, gpu_performance and memory_performance apply at
     // start (the panel is created once, at window setup); all Standard opens
@@ -315,8 +314,7 @@ private:
 
   // config/simple_shadow (oot3d_simple_shadow.h): present = on, applied at
   // once. Only the deko3d backend draws the body, so only the Switch has it.
-  // config/simple_shadow_method and config/simple_shadow_cutscenes (a 0.2.3
-  // test): how it is drawn and whether cutscenes keep it, applied at once.
+  // config/simple_shadow_cutscenes: whether cutscenes keep it, applied at once.
   void DrawSimpleShadow() {
 #if defined(__SWITCH__)
     ImGui::Separator();
@@ -327,17 +325,6 @@ private:
         return SaveSimpleShadowFlag(config, kSimpleShadowConfigName, simpleShadow);
       });
     }
-    auto &bridge = Fast::Oot3d::PlayerShadowBridge::Instance();
-    const char *const methods[] = {"Two passes", "One pass (overlaps darker)", "Mark, then cover (default)",
-                                   "Texture (soft edges)", "Decal (follows the ground and walls)"};
-    static_assert(std::size(methods) == Fast::Oot3d::kPlayerShadowMethodCount);
-    int method = static_cast<int>(bridge.Method());
-    if (ImGui::Combo("Shadow method", &method, methods, static_cast<int>(std::size(methods)))) {
-      const auto chosen = static_cast<Fast::Oot3d::PlayerShadowMethod>(method);
-      bridge.SetMethod(chosen);
-      Write(kSimpleShadowMethodConfigName,
-            [config = mConfig, chosen] { return SaveSimpleShadowMethod(config, chosen); });
-    }
     bool cutscenes = SimpleShadowCutscenes().load(std::memory_order_relaxed);
     if (ImGui::Checkbox("Shadow in cutscenes", &cutscenes)) {
       SimpleShadowCutscenes().store(cutscenes, std::memory_order_relaxed);
@@ -345,19 +332,14 @@ private:
         return SaveSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName, cutscenes);
       });
     }
-    for (const char *name :
-         {kSimpleShadowConfigName, kSimpleShadowMethodConfigName, kSimpleShadowCutscenesConfigName})
+    for (const char *name : {kSimpleShadowConfigName, kSimpleShadowCutscenesConfigName})
       if (Writer().Failed(name)) ImGui::TextWrapped("Could not write config/%s.", name);
     ImGui::TextDisabled("Applies at once. Link's whole body casts his shadow along the scene's light, "
                         "instead of the two spots under his feet (Single Screen Experience's Simple "
-                        "shadows). deko3d renderer only; drawing Link twice costs some GPU time.");
-    ImGui::TextDisabled("Shadow method: the same shadow drawn five ways. The first four lay it flat on "
-                        "the ground under Link: Mark, then cover looks like Two passes at about half the GPU "
-                        "time; One pass is as cheap but darkens overlapping limbs twice; Texture has soft "
-                        "edges, as in Single Screen Experience. Decal casts it on whatever is there, slopes, "
-                        "steps and walls included, and stops at a ledge (the log's dkperf lines: "
-                        "shadow_<method>_ms). Cutscenes keep the game's foot shadows unless Shadow in "
-                        "cutscenes is on.");
+                        "shadows). deko3d renderer only; it costs some GPU time.");
+    ImGui::TextDisabled("It lies on whatever is under and behind Link, slopes, steps and walls included, and "
+                        "ends at a ledge (the log's dkperf lines: shadow_decal_ms). Cutscenes keep the game's foot "
+                        "shadows unless Shadow in cutscenes is on.");
 #endif
   }
 

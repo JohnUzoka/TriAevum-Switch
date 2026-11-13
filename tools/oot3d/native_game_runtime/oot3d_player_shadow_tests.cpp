@@ -144,8 +144,11 @@ void TestDecal() {
           "decal: a raised point reads the silhouette where the light takes it to the plane");
   Require(!PlayerShadowDecalLookup(*decal, {30.0F, 20.0F, 0.0F}), "decal: nothing between him and the light");
   Require(!PlayerShadowDecalLookup(*decal, {2.0F, 30.0F, 1.0F}), "decal: not on Link himself");
-  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, -70.0F, 0.0F}), "decal: nothing below the range (past a ledge)");
-  const auto low = PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowBodyBelow + lift + 2.0F, 0.0F});
+  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow - 5.0F, 0.0F}),
+          "decal: nothing below the range (past a ledge)");
+  Require(!PlayerShadowDecalLookup(*decal, {-60.0F, kPlayerShadowDecalAbove + 5.0F, 0.0F}),
+          "decal: nothing above the range");
+  const auto low = PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowDecalBelow + lift + 2.0F, 0.0F});
   Require(low && low->Strength < 0.5F, "decal: it fades at the range's ends");
 }
 

@@ -48,54 +48,18 @@ struct PlayerShadowFrame {
 
 [[nodiscard]] constexpr uint64_t PlayerShadowActorIdentity(uint32_t actor) noexcept { return actor; }
 
-// How the deko3d backend draws it (config/simple_shadow_method, L3+R3 > Video
-// > Shadow method; each method's GPU time in the dkperf lines'
-// shadow_<word>_ms):
-// - TwoPass: the meshes darken where the top stencil bit is clear and set it,
-//   then the same meshes without colour zero it (0.2.3 build 33);
-// - OnePass: the meshes darken without the stencil, overlapping limbs darker;
-// - Cover: the meshes only set the bit, inside the screen rectangle of the
-//   floor region (PlayerShadowFloorRegion); one triangle over that rectangle
-//   darkens where it is set and zeroes it;
-// - Texture: the meshes go flat into a silhouette texture of the floor region,
-//   which one quad on the floor samples (the mod's way: soft edges);
-// - Decal: the same silhouette, cast on whatever the scene drew around Link
-//   (user, logs42: the others lie on one plane, so half of the shadow went
-//   under rising ground and none bent over steps or walls): a rectangle over
-//   the region reads the scene's depth, takes each pixel's world point along
-//   the light into the silhouette, and stops at the region's height range.
-enum class PlayerShadowMethod : uint8_t { TwoPass, OnePass, Cover, Texture, Decal };
-inline constexpr size_t kPlayerShadowMethodCount = 5U;
-// logs37 (Switch Lite, 307 MHz, the Temple of Time facing Link): per frame
-// two passes 0.96-1.02 ms, texture 0.63-0.89, cover 0.52-0.58, one pass
-// 0.50-0.51. Cover looks like two passes at about half the cost.
-inline constexpr PlayerShadowMethod kPlayerShadowDefaultMethod = PlayerShadowMethod::Cover;
+// How the deko3d backend draws it: a projected decal (user, logs42-43; it
+// replaced the four flat methods of 0.2.3, which laid Link's flattened body
+// on one plane, so half of the shadow went under rising ground and none bent
+// over steps or walls). His meshes go flat along the light into a silhouette
+// of the floor region; at the frame's overlay point one triangle over the
+// region's box reads the scene's depth, takes each pixel's world point along
+// the light into the silhouette, and stops at the box's height range. Its GPU
+// time is the dkperf lines' shadow_decal_ms.
+enum class PlayerShadowMethod : uint8_t { Decal };
+inline constexpr size_t kPlayerShadowMethodCount = 1U;
 
-// Its word in config/simple_shadow_method and in the dkperf keys.
-[[nodiscard]] constexpr std::string_view PlayerShadowMethodWord(PlayerShadowMethod method) noexcept {
-    switch (method) {
-    case PlayerShadowMethod::TwoPass: return "two_pass";
-    case PlayerShadowMethod::OnePass: return "one_pass";
-    case PlayerShadowMethod::Cover: return "cover";
-    case PlayerShadowMethod::Texture: return "texture";
-    case PlayerShadowMethod::Decal: return "decal";
-    }
-    return "two_pass";
-}
-
-// The file's first word; anything else (no file included) is the default.
-[[nodiscard]] constexpr PlayerShadowMethod ParsePlayerShadowMethod(std::string_view text) noexcept {
-    constexpr std::string_view blank = " \t\r\n";
-    const size_t first = text.find_first_not_of(blank);
-    if (first == std::string_view::npos) return kPlayerShadowDefaultMethod;
-    text.remove_prefix(first);
-    text = text.substr(0, text.find_first_of(blank));
-    for (size_t index = 0; index < kPlayerShadowMethodCount; ++index) {
-        const auto method = static_cast<PlayerShadowMethod>(index);
-        if (text == PlayerShadowMethodWord(method)) return method;
-    }
-    return kPlayerShadowDefaultMethod;
-}
+[[nodiscard]] constexpr std::string_view PlayerShadowMethodWord(PlayerShadowMethod) noexcept { return "decal"; }
 
 // The mod's rules (EUR 3.2.2 payload 0x005FDA54): lights weaker than 0.02 do not
 // count, a strongest light under 0.35 tilts the shadow toward the vertical, and
@@ -364,7 +328,11 @@ inline constexpr size_t kPlayerShadowViewRow = 4U;
 // it, hanging from a ledge, but not under the floor, which would only stretch
 // the region toward the light) projected along the light. A pose leaving the
 // box is cut at its edge.
-inline constexpr float kPlayerShadowBodyRadius = 60.0F;
+// The box his shadow comes from: around his position, from this far below it
+// (not under the floor) to this far above. logs43: the decal cost 1.46 ms a
+// frame at 307 MHz (p90 2.0) with 60 / 60 / 110, mostly the pixels of its
+// screen rectangle; Link with a sword out stays within 45.
+inline constexpr float kPlayerShadowBodyRadius = 45.0F;
 inline constexpr float kPlayerShadowBodyBelow = 60.0F;
 inline constexpr float kPlayerShadowBodyAbove = 110.0F;
 
@@ -532,6 +500,10 @@ inline constexpr float kPlayerShadowDecalLinkRadius = 18.0F; // his body, not a 
 inline constexpr float kPlayerShadowDecalLinkTall = 80.0F;
 inline constexpr float kPlayerShadowDecalLinkMiddle = 25.0F;   // above his position
 inline constexpr float kPlayerShadowDecalFade = 10.0F;         // units at the height range's ends
+// The receivers' height range above the plane: a step down this deep, a wall
+// this high (his head is about 50 up). Its box sets the screen rectangle.
+inline constexpr float kPlayerShadowDecalBelow = 45.0F;
+inline constexpr float kPlayerShadowDecalAbove = 70.0F;
 
 struct PlayerShadowDecal {
     std::array<float, 16> ClipToWorld{}; // row-major
@@ -543,8 +515,8 @@ struct PlayerShadowDecal {
     std::array<float, 3> Across{};
     std::array<float, 2> AlongRange{};
     std::array<float, 2> AcrossRange{};
-    float Lowest = -kPlayerShadowBodyBelow; // receivers' height above the plane
-    float Highest = kPlayerShadowBodyAbove;
+    float Lowest = -kPlayerShadowDecalBelow; // receivers' height above the plane
+    float Highest = kPlayerShadowDecalAbove;
     std::array<float, 3> Link{};   // his position
     std::array<float, 3> Middle{}; // the side of him the light comes from is not his shadow
 };
@@ -730,10 +702,6 @@ class PlayerShadowBridge final {
     // loaded): until then the game keeps Link's own foot shadows.
     void SetRendererReady(bool ready) noexcept { mRendererReady.store(ready, std::memory_order_relaxed); }
     [[nodiscard]] bool RendererReady() const noexcept { return mRendererReady.load(std::memory_order_relaxed); }
-    // config/simple_shadow_method: set by the Video panel, read by the
-    // renderer at each frame.
-    void SetMethod(PlayerShadowMethod method) noexcept { mMethod.store(method, std::memory_order_relaxed); }
-    [[nodiscard]] PlayerShadowMethod Method() const noexcept { return mMethod.load(std::memory_order_relaxed); }
 
   private:
     struct Entry {
@@ -745,7 +713,6 @@ class PlayerShadowBridge final {
     std::optional<PlayerShadowFrame> mSelected;
     Stats mStats;
     std::atomic<bool> mRendererReady{false};
-    std::atomic<PlayerShadowMethod> mMethod{kPlayerShadowDefaultMethod};
 };
 
 } // namespace Fast::Oot3d

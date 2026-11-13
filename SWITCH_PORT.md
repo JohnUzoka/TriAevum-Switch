@@ -958,6 +958,33 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   and a wall behind him, nothing between him and the light, not on him, nothing past the range, the
   fade); guards "logs42 (user): the flat shadow ..." and "method decal's shader ...".
 
+### Simple shadow: the decal only, drawn after the translucent world, cheaper (user, logs43, 11/13)
+- **Seen (0.2.4-test.5):** "decal looks pretty good", "some minor issues where it would go under meshes in
+  areas" (clips in `Images/13/`); "if you can get it good we will be good to release and you can remove the
+  other non decal options".
+- **Under meshes:** the shadow was drawn at the frame's first translucent world draw, so the game's
+  translucent pass (paths, grass and flower patches, puddles, foliage cards laid on the ground) was drawn
+  over it. It is now drawn at the first overlay (HUD, minimap, title card), after the translucent world,
+  or before a copy reads the target (`gfx_deko3d_pica_draw.cpp`). Translucent effects without depth that
+  cross the silhouette's area (dust, smoke) are darkened with what is behind them.
+- **Cost (logs43, 307 MHz):** decal 1.46 ms a frame (p90 2.0, max 3.6) against texture 0.23 there; most of
+  it is the pixels of the decal's rectangle, the screen box of the region from below to above the plane.
+  The box is smaller: its footprint radius 45 instead of 60 (`kPlayerShadowBodyRadius`, Link with a sword
+  out stays within it), receivers from 45 below to 70 above the plane instead of 60 and 110
+  (`kPlayerShadowDecalBelow/Above`; his head is about 50 up). The shadow line in `deko3d.txt` now writes
+  the average pixels a frame and the frames without a decal.
+- **Softness (user: "could it be adjusted for sharpness", "if that makes it more expensive leave it out"):**
+  the same four bilinear taps, spread from 0.75 silhouette texels where the shadow meets his feet to 2.25
+  texels 60 units along the plane and beyond (the shader's `length(flat_point)`), so it is crisp at the
+  feet and softer farther, at no extra texture reads (the DKSH stays 2048 B). Wider, four taps double the edge.
+- **One method:** Two passes, One pass, Mark then cover and Texture are gone with their menu, their
+  stencil bookkeeping and the floor-quad shaders; `config/simple_shadow_method` is not read (a file left
+  by 0.2.3 is ignored) and the gameplay log line has no `shadow_method=`. The dkperf key stays
+  `shadow_decal_ms`.
+- **Test:** `oot3d_player_shadow_tests` (TestDecal with the new range), `oot3d_gameplay_options_log_tests`
+  (no `shadow_method`), `oot3d_simple_shadow_tests`; guards for the decal, its silhouette barriers and the
+  overlay draw point.
+
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go
   underground" in the Forest Temple.

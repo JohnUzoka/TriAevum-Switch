@@ -5,7 +5,7 @@
 // (PlayerShadowDecalWorldPoint), goes along the light into the silhouette and
 // darkens by it, under the rules of PlayerShadowDecalLookup (player_shadow.h):
 // only within the region's height range, not between Link and the light, not
-// Link himself. Four bilinear taps soften the edge as in method "texture".
+// Link himself. Four bilinear taps soften the edge, more away from his feet.
 layout(std140, binding = 0) uniform PlayerShadowDecal {
     mat4 clip_to_world;  // world = clip_to_world * (ndc x, ndc y, -depth, 1), then / w
     vec4 viewport;       // x, y, width, height of Link's draws (target pixels)
@@ -50,7 +50,10 @@ void main() {
     // The silhouette's rows follow the scene's NDC-to-row rule, as the floor quad's texcoords.
     if (origin.w <= 0.5) uv.y = 1.0 - uv.y;
 
-    float d = shade.y * 0.75;
+    // Crisp where it meets his feet, softer farther along (as a real shadow):
+    // the same four taps, spread from 0.75 to 2.25 texels over 60 units of the
+    // plane; wider, four taps show a doubled edge.
+    float d = shade.y * mix(0.75, 2.25, clamp(length(flat_point) / 60.0, 0.0, 1.0));
     float cover = texture(silhouette, uv + vec2(-d, -d)).r + texture(silhouette, uv + vec2(d, -d)).r +
                   texture(silhouette, uv + vec2(-d, d)).r + texture(silhouette, uv + vec2(d, d)).r;
     if (cover <= 0.0) discard;

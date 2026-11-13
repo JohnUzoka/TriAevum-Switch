@@ -135,14 +135,16 @@ GUARDS = [
           r'result\.PickedUp = pageState == kTopScreenItemsPickedUp;.*?if \(!state\.PickedUp \|\| state\.Position >= state\.Grid\.size\(\)\)',
           "oot3d_top_screen_mod_profile_tests (TestPicker)"),
     Guard("logs42 (user): the flat shadow went half under rising ground and never bent over steps or walls; "
-          "method decal resolves the scene's depth, samples it with only the colour bound and casts the "
+          "the decal resolves the scene's depth, samples it with only the colour bound and casts the "
           "silhouette on each pixel's world point",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
-          r'case Method::Decal: \{.*?PlayerShadowDepthSlot\(target\).*?dkCmdBufResolveDepthValues\(cmd\);\s+'
+          r'PlayerShadowDepthSlot\(target\).*?DrawPlayerShadowSilhouette\(draws\);\s+BindPicaTarget\(target\);.*?'
+          r'dkCmdBufResolveDepthValues\(cmd\);\s+'
           r'dkCmdBufBarrier\(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image \| DkInvalidateFlags_Descriptors\);.*?'
           r'dkCmdBufBindRenderTargets\(cmd, colors, 1, nullptr\);\s+mBoundTarget = nullptr;.*?'
           r'shadow\.CoverVertex, shadow\.DecalFragment',
-          "oot3d_player_shadow_tests (TestDecal)"),
+          "oot3d_player_shadow_tests (TestDecal)",
+          forbid=r'Method::(TwoPass|OnePass|Cover|Texture)|kPlayerShadowStencilBit'),
     Guard("method decal's shader keeps PlayerShadowDecalLookup's rules: the height range, not toward the light "
           "from Link, not Link himself, along the light into the silhouette",
           "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
@@ -2495,9 +2497,11 @@ GUARDS = [
           r'Oot3dNativeGame::SimpleShadowCutscenes\(\)\.load\(std::memory_order_relaxed\)\)\) \{.*?'
           r'Oot3dWholeAotExitAt\(\*exitPc, state\);',
           "oot3d_simple_shadow_tests (TestHook)"),
-    Guard("Simple shadow: deko3d says it can draw the body only once its program is loaded",
+    Guard("Simple shadow: deko3d says it can draw the body only once its programs and silhouette are loaded",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
-          r'PlayerShadowBridge::Instance\(\)\.SetRendererReady\(mPlayerShadow\.Fragment != nullptr\);',
+          r'const bool ready = shadow\.Fragment != nullptr && shadow\.CoverVertex != nullptr &&\s+'
+          r'shadow\.DecalFragment != nullptr && shadow\.SilhouetteMemory != nullptr;\s+'
+          r'Oot3d::PlayerShadowBridge::Instance\(\)\.SetRendererReady\(ready\);',
           "oot3d_player_shadow_tests (TestBridge)"),
     Guard("Simple shadow: each target gets its own captured draws (a frame can draw Link into two)",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
@@ -2532,59 +2536,22 @@ GUARDS = [
           r'const bool rasterDepth = !draw\.WBuffering && draw\.DepthRange == -1\.0F && draw\.NearPlane == 0\.0F;\s+'
           r'if \(!draw\.DepthTestEnabled \|\| !draw\.DepthWriteEnabled \|\| !rasterDepth \|\|',
           "oot3d_player_shadow_tests (TestPatch)"),
-    Guard("Simple shadow, two passes: overlapping limbs darken a pixel once, and the borrowed stencil bit goes "
-          "back to zero (a second pass over the same meshes; a whole-target clear only once the game or a "
-          "savestate may have set it, since clearing one stencil bit rewrites the whole depth and stencil image)",
-          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
-          r'if \(stencil && shadow\.StencilShared && shadow\.StencilClean\.insert\(&target\)\.second\) \{.*?'
-          r'dkCmdBufClearDepthStencil\(cmd, false, 0\.0F, kPlayerShadowStencilBit, 0U\);.*?'
-          r'dkColorWriteStateSetMask\(&noColor, 0, 0\);.*?'
-          r'depthStencil\.stencilFrontPassOp = depthStencil\.stencilBackPassOp = pass;\s+'
-          r'depthStencil\.stencilFrontCompareOp = depthStencil\.stencilBackCompareOp = compare;.*?'
-          r'case Method::TwoPass:.*?'
-          r'drawMeshes\(true, DkStencilOp_Replace, DkCompareOp_NotEqual, std::nullopt\);.*?'
-          r'dkCmdBufBindColorWriteState\(cmd, &noColor\);\s+'
-          r'drawMeshes\(true, DkStencilOp_Zero, DkCompareOp_Always, std::nullopt\);',
-          "", forbid=r'depthWriteEnable = 1'),
-    Guard("Simple shadow, cover: the meshes set the stencil bit only inside the rectangle the cover then draws "
-          "over, so every bit they set goes back to zero (a bit left set would darken a later frame's cover or "
-          "block the two-pass shadow there)",
-          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
-          r'const DkScissor scissor = clip \? Intersect\(draw\.Scissor, \*clip\) : draw\.Scissor;.*?'
-          r'case Method::Cover: \{.*?'
-          r'const DkScissor marked = clip \? Intersect\(draw\.Scissor, \*clip\) : draw\.Scissor;\s+'
-          r'if \(marked\.width != 0U && marked\.height != 0U\) cover = cover \? Union\(\*cover, marked\) : marked;.*?'
-          r'drawMeshes\(true, DkStencilOp_Replace, DkCompareOp_Always, clip\);.*?'
-          r'bindDepthStencil\(false, DkCompareOp_Always, true, DkStencilOp_Zero, DkCompareOp_Equal\);.*?'
-          r'ApplyDkViewport\(cmd, static_cast<float>\(cover->x\), static_cast<float>\(cover->y\),\s+'
-          r'static_cast<float>\(cover->width\), static_cast<float>\(cover->height\)\);\s+'
-          r'dkCmdBufSetScissors\(cmd, 0, &\*cover, 1\);',
-          "oot3d_player_shadow_tests (TestScreenRect)"),
-    Guard("Simple shadow, texture: the floor quad samples the silhouette only once it is drawn (a fragment "
-          "barrier, the image cache dropped), a second target's silhouette waits for the first quad's reads, and "
-          "the scene target is bound again after it",
+    Guard("Simple shadow: the decal samples the silhouette only once it is drawn (a fragment barrier, the image "
+          "cache dropped), a second target's silhouette waits for the first decal's reads, and the scene target "
+          "is bound again after it",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
           r'if \(shadow\.SilhouetteFrame == mDevice\.Frame\(\)\) dkCmdBufBarrier\(cmd, DkBarrier_Fragments, 0\);.*?'
           r'dkCmdBufBindRenderTargets\(cmd, colors, 1, nullptr\);\s+mBoundTarget = nullptr;.*?'
           r'dkCmdBufBarrier\(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image\);.*?'
-          r'if \(method == Method::Texture \|\| method == Method::Decal\) DrawPlayerShadowSilhouette\(draws\);\s+BindPicaTarget\(target\);',
+          r'DrawPlayerShadowSilhouette\(draws\);\s+BindPicaTarget\(target\);',
           "oot3d_player_shadow_tests (TestSilhouette)"),
-    Guard("Simple shadow: a frame whose draws use the top stencil bit keeps it (two passes and cover draw in one "
-          "pass then, not dropped: the foot shadows are hidden already)",
-          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
-          r'if \(draw\.Stencil\.Enabled && \(\(draw\.Stencil\.WriteMask \| draw\.Stencil\.CompareMask\) & '
-          r'kPlayerShadowStencilBit\) != 0U\) \{\s+shadow\.StencilTaken = shadow\.StencilShared = true;\s+'
-          r'shadow\.StencilClean\.clear\(\);.*?'
-          r'if \(shadow\.StencilTaken && \(method == Method::TwoPass \|\| method == Method::Cover\)\) \{.*?'
-          r'method = Method::OnePass;\s+\}\s+'
-          r'const bool stencil = method == Method::TwoPass \|\| method == Method::Cover;.*?'
-          r'case Method::OnePass:\s+drawMeshes\(false, DkStencilOp_Keep, DkCompareOp_Always, std::nullopt\);',
-          ""),
-    Guard("Simple shadow: drawn at the grass's points (after the opaque world, before translucent draws, "
-          "overlays and the display transfer)",
+    Guard("logs43 (user): ground overlays drawn in the translucent world (paths, grass and flower patches, "
+          "puddles) covered the decal, which came before them: it is drawn at the first overlay, else before a "
+          "copy reads the target",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_draw.cpp",
-          r'if \(Oot3d::GrassDrawPointOf\(draw\.CompositionDomain, draw\.Composition\.Layer\)\) \{\s+'
-          r'DrawPlayerShadow\(\*target\);.*?DrawPlayerShadow\(\*source\);.*?DrawPlayerShadow\(\*source\);',
+          r'if \(Oot3d::GrassDrawPointOf\(draw\.CompositionDomain, draw\.Composition\.Layer\) == '
+          r'Oot3d::GrassDrawPoint::Overlay\) \{\s+DrawPlayerShadow\(\*target\);.*?'
+          r'DrawPlayerShadow\(\*source\);.*?DrawPlayerShadow\(\*source\);',
           ""),
     Guard("Gameplay options: a product title module without a block at their PCs would never run them",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_setup.cpp",

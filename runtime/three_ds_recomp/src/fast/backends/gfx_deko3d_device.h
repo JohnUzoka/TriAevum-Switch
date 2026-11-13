@@ -147,7 +147,7 @@ class Device {
     // dkperf opaque_ms: a timestamp at the frame's first translucent world
     // draw (once per frame; the frame top to it).
     void MarkOpaqueEnd();
-    // dkperf shadow_<method>_ms (config/simple_shadow_method): timestamps
+    // dkperf shadow_decal_ms (config/simple_shadow): timestamps
     // around the frame's first Simple shadow draw point, by the method that
     // drew it (Oot3d::PlayerShadowMethod); End without Start writes nothing.
     void MarkShadowStart();

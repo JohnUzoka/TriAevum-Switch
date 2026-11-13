@@ -439,8 +439,12 @@ bool GfxRenderingAPIDeko3d::SubmitPicaDraw(const GfxNativePicaDrawView& draw, st
         // per frame), before grass.
         mDevice.MarkOpaqueEnd();
     }
-    if (Oot3d::GrassDrawPointOf(draw.CompositionDomain, draw.Composition.Layer)) {
-        DrawPlayerShadow(*target); // config/simple_shadow, at the grass's points
+    // config/simple_shadow: at the first overlay (HUD, minimap, title card),
+    // after the translucent world, whose ground overlays (paths, grass and
+    // flower patches, puddles) covered the shadow when it came before them
+    // (user, logs43); else before a copy reads the target.
+    if (Oot3d::GrassDrawPointOf(draw.CompositionDomain, draw.Composition.Layer) == Oot3d::GrassDrawPoint::Overlay) {
+        DrawPlayerShadow(*target);
     }
     if (mGrassDraws) {
         // config/grass = draw: before the first translucent world draw or the
@@ -1301,9 +1305,6 @@ bool GfxRenderingAPIDeko3d::RestorePicaColorTargets(
                 throw std::runtime_error(failure);
             }
         }
-        // The restored stencil can hold the game's top bit.
-        mPlayerShadow.StencilShared = true;
-        mPlayerShadow.StencilClean.clear();
         Deko3d::Log("savestate: restored %zu targets (%s)", snapshots.size(),
                     snapshots.front().RenderScalePermille == Renderer3ds::kPicaGuestExtentRenderScalePermille
                         ? "guest extent"

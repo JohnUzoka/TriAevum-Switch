@@ -3,9 +3,8 @@
 uam and generates runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow_dksh.h.
 
 The flattened meshes' vertex stage is the PICA program of each of Link's draws, so only
-the fragment stage is built for them; the cover triangle (method "cover") and the floor
-quad (method "texture") have both stages here; method "decal" draws the cover triangle with
-its own fragment stage. None goes in deko3d.pack, which holds
+the fragment stage is built for them (the silhouette); the decal is one triangle over the
+viewport (player_shadow_cover_vsh.glsl) with its own fragment stage. None goes in deko3d.pack, which holds
 PICA texts keyed by their hash.
 
 Usage: python3 tools/oot3d/deko3d_shadow/gen.py [--uam /opt/devkitpro/tools/bin/uam]
@@ -24,8 +23,6 @@ OUT = ROOT / "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow
 PROGRAMS = (
     ("frag", "player_shadow_fsh.glsl", "kPlayerShadowFragmentDksh"),
     ("vert", "player_shadow_cover_vsh.glsl", "kPlayerShadowCoverVertexDksh"),
-    ("vert", "player_shadow_floor_vsh.glsl", "kPlayerShadowFloorVertexDksh"),
-    ("frag", "player_shadow_floor_fsh.glsl", "kPlayerShadowFloorFragmentDksh"),
     ("frag", "player_shadow_decal_fsh.glsl", "kPlayerShadowDecalFragmentDksh"),
 )
 

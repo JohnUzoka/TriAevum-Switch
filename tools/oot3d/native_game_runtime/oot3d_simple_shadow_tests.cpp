@@ -242,23 +242,6 @@ void TestConfig() {
               !ReadSimpleShadowFlag(config, kSimpleShadowConfigName),
           "off removes it");
 
-  using Fast::Oot3d::PlayerShadowMethod;
-  Require(ReadSimpleShadowMethod(config) == PlayerShadowMethod::Cover, "no method file: mark, then cover");
-  for (const auto method : {PlayerShadowMethod::TwoPass, PlayerShadowMethod::OnePass, PlayerShadowMethod::Texture})
-    Require(SaveSimpleShadowMethod(config, method) && ReadSimpleShadowMethod(config) == method,
-            "each method reads back");
-  Require(SaveSimpleShadowMethod(config, PlayerShadowMethod::Cover) &&
-              !std::filesystem::exists(config / kSimpleShadowMethodConfigName) &&
-              ReadSimpleShadowMethod(config) == PlayerShadowMethod::Cover,
-          "the default removes the file");
-  const auto write = [&](const char *text) {
-    std::ofstream file(config / kSimpleShadowMethodConfigName, std::ios::trunc);
-    file << text;
-  };
-  write("  texture\r\n");
-  Require(ReadSimpleShadowMethod(config) == PlayerShadowMethod::Texture, "a word saved on Windows (CRLF, spaces)");
-  write("stencil\n");
-  Require(ReadSimpleShadowMethod(config) == PlayerShadowMethod::Cover, "an unknown word: the default");
   std::filesystem::remove_all(config, ignored);
 }
 
