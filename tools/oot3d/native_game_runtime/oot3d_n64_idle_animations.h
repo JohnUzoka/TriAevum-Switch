@@ -1,7 +1,7 @@
 #pragma once
 
-// L3+R3 > Game > Gameplay > "N64 idle animations" (config/no_n64_idle_animations,
-// present = off; on by default).
+// L3+R3 > Game > Gameplay > "Idle animations" (config/idle_animations: absent =
+// N64, the default; "mixed" = N64's or OoT3D's at even odds; "3ds" = OoT3D's).
 //
 // Standing still, Link plays a fidget every other idle cycle. OoT3D picks it
 // as N64 does (Player_ChooseNextIdleAnim, inlined in Player_Action_Idle at
@@ -48,6 +48,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <system_error>
 
 namespace Oot3dNativeGame {
@@ -104,28 +105,57 @@ bool RestoreN64IdleFidget(Bus &memory, std::array<std::uint32_t, 16> &r) {
   return true;
 }
 
+enum class IdleAnimations : std::uint8_t { N64 = 0, Mixed = 1, Original3ds = 2 };
+
 // Read by the hook at every fidget choice, written by the panel.
-inline std::atomic<bool> &N64IdleAnimationsEnabled() noexcept {
-  static std::atomic<bool> enabled{true};
-  return enabled;
+inline std::atomic<IdleAnimations> &IdleAnimationsSetting() noexcept {
+  static std::atomic<IdleAnimations> setting{IdleAnimations::N64};
+  return setting;
 }
 
-inline constexpr const char *kN64IdleAnimationsOffConfigName = "no_n64_idle_animations";
-
-inline bool ReadN64IdleAnimationsEnabled(const std::filesystem::path &config) {
-  std::error_code error;
-  return !std::filesystem::exists(config / kN64IdleAnimationsOffConfigName, error);
+// Whether this choice skips OoT3D's swap; `coin` is any random value (Mixed
+// takes its lowest bit, so each swapped choice is N64's or OoT3D's at even odds).
+constexpr bool UseN64IdleFidget(IdleAnimations setting, std::uint32_t coin) noexcept {
+  return setting == IdleAnimations::N64 || (setting == IdleAnimations::Mixed && (coin & 1U) != 0U);
 }
 
-// Removes (on) or creates (off) the file; false if that failed.
-inline bool SaveN64IdleAnimationsEnabled(const std::filesystem::path &config, bool enabled) {
+// A host random value for Mixed (xorshift32; the game's own random state is
+// left alone, so the choice changes nothing else in the game).
+inline std::uint32_t IdleAnimationsCoin() noexcept {
+  static std::atomic<std::uint32_t> state{0x9E3779B9U};
+  std::uint32_t x = state.load(std::memory_order_relaxed);
+  x ^= x << 13U;
+  x ^= x >> 17U;
+  x ^= x << 5U;
+  state.store(x, std::memory_order_relaxed);
+  return x;
+}
+
+constexpr const char *IdleAnimationsName(IdleAnimations setting) noexcept {
+  return setting == IdleAnimations::Mixed ? "mixed" : setting == IdleAnimations::Original3ds ? "3ds" : "n64";
+}
+
+inline constexpr const char *kIdleAnimationsConfigName = "idle_animations";
+
+inline IdleAnimations ReadIdleAnimations(const std::filesystem::path &config) {
+  std::ifstream file(config / kIdleAnimationsConfigName);
+  std::string word;
+  if (!(file >> word)) return IdleAnimations::N64;
+  if (word == "mixed") return IdleAnimations::Mixed;
+  if (word == "3ds") return IdleAnimations::Original3ds;
+  return IdleAnimations::N64;
+}
+
+// Removes the file (N64) or writes the setting's name; false if that failed.
+inline bool SaveIdleAnimations(const std::filesystem::path &config, IdleAnimations setting) {
   std::error_code error;
-  if (enabled) {
-    std::filesystem::remove(config / kN64IdleAnimationsOffConfigName, error);
+  if (setting == IdleAnimations::N64) {
+    std::filesystem::remove(config / kIdleAnimationsConfigName, error);
     return !error;
   }
   std::filesystem::create_directories(config, error);
-  std::ofstream file(config / kN64IdleAnimationsOffConfigName, std::ios::trunc);
+  std::ofstream file(config / kIdleAnimationsConfigName, std::ios::trunc);
+  file << IdleAnimationsName(setting) << '\n';
   return static_cast<bool>(file);
 }
 

@@ -14,7 +14,7 @@ public:
   explicit GameplaySettingsPanel(std::filesystem::path config)
       : mConfig(std::move(config)), mDashAnimations(RollDashAnimationsInstalled(mConfig)) {
     LandingRollEnabled().store(ReadLandingRollEnabled(mConfig), std::memory_order_relaxed);
-    N64IdleAnimationsEnabled().store(ReadN64IdleAnimationsEnabled(mConfig), std::memory_order_relaxed);
+    IdleAnimationsSetting().store(ReadIdleAnimations(mConfig), std::memory_order_relaxed);
     RollDashEnabled().store(ReadRollDashEnabled(mConfig), std::memory_order_relaxed);
     QuickPutAwayEnabled().store(ReadQuickPutAwayEnabled(mConfig), std::memory_order_relaxed);
     DamageMultiplier().store(ReadDamageMultiplier(mConfig), std::memory_order_relaxed);
@@ -36,15 +36,17 @@ public:
     if (mError)
       ImGui::TextWrapped("Could not write config/%s.", kLandingRollOffConfigName);
     ImGui::Separator();
-    bool idle = N64IdleAnimationsEnabled().load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("N64 idle animations", &idle)) {
-      N64IdleAnimationsEnabled().store(idle, std::memory_order_relaxed);
-      mIdleError = !SaveN64IdleAnimationsEnabled(mConfig, idle);
+    static constexpr const char *kIdleLabels[] = {"N64 (default)", "N64 and 3DS, at random", "3DS"};
+    int idle = static_cast<int>(IdleAnimationsSetting().load(std::memory_order_relaxed));
+    if (ImGui::Combo("Idle animations", &idle, kIdleLabels, IM_ARRAYSIZE(kIdleLabels))) {
+      const auto setting = static_cast<IdleAnimations>(idle);
+      IdleAnimationsSetting().store(setting, std::memory_order_relaxed);
+      mIdleError = !SaveIdleAnimations(mConfig, setting);
     }
-    ImGui::TextWrapped("Standing still, Link stretches (unarmed) and adjusts his shield again, as on "
-                       "N64; OoT3D plays the tunic and sword fidgets in their place.");
+    ImGui::TextWrapped("Standing still, Link stretches (unarmed) and adjusts his shield, as on N64; the "
+                       "3DS plays its tunic and sword fidgets in their place. At random: either, each time.");
     if (mIdleError)
-      ImGui::TextWrapped("Could not write config/%s.", kN64IdleAnimationsOffConfigName);
+      ImGui::TextWrapped("Could not write config/%s.", kIdleAnimationsConfigName);
     ImGui::Separator();
     bool dash = RollDashEnabled().load(std::memory_order_relaxed);
     if (ImGui::Checkbox("Roll dash", &dash)) {

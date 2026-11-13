@@ -552,11 +552,13 @@ void ApplyNativeWidescreenProjectionPolicy(
 #endif
     }
   }
-  // N64 idle animations (oot3d_n64_idle_animations.h): the unarmed stretch
-  // and the shield fidget, which OoT3D swaps right after the fidget table
-  // load, leave the graph past the swap with the block's registers.
+  // Idle animations (oot3d_n64_idle_animations.h): the unarmed stretch and
+  // the shield fidget, which OoT3D swaps right after the fidget table load,
+  // leave the graph past the swap with the block's registers (N64: always;
+  // Mixed: at even odds; 3DS: never).
   if (pc == Oot3dNativeGame::kN64IdleAnimationsHookPc && wholeAotExecutionActive &&
-      Oot3dNativeGame::N64IdleAnimationsEnabled().load(std::memory_order_relaxed) &&
+      Oot3dNativeGame::UseN64IdleFidget(Oot3dNativeGame::IdleAnimationsSetting().load(std::memory_order_relaxed),
+                                        Oot3dNativeGame::IdleAnimationsCoin()) &&
       Oot3dNativeGame::RestoreN64IdleFidget(memory, state.r)) {
 #if defined(OOT3D_NATIVE_DIRECT_AOT_PLUGIN)
     Oot3dNativeGame::Oot3dWholeAotPluginObservableExit(Oot3dNativeGame::kN64IdleAnimationsResumePc, state);

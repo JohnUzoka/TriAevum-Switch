@@ -1078,7 +1078,7 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Fix:** the 21 texts of `logs/deko3d_shaders/` went to `shaders/console-missing/` (86 files); uam compiles
   all of them, no scratch. The release build adds them and their lighting variants to the pack.
 
-### N64 idle animations: L3+R3 > Game > Gameplay (`config/no_n64_idle_animations`, user 11/13, on by default)
+### Idle animations: L3+R3 > Game > Gameplay (`config/idle_animations`, user 11/13, N64 by default)
 - **Request:** "bring back the old unused N64 idle animation". TCRF (OoT3D/Unused Link Animations): "Link's unarmed
   stretching and shield fidget idle animations are disabled".
 - **Cause (EUR code.bin, Capstone):** `Player_Action_Idle` (`0x004BA538`) inlines N64's `Player_CheckForIdleAnim` and
@@ -1096,14 +1096,17 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   starts and dispatch entries of `fork-gen-432c798dde-674182a5-pgo` (shard 102) and are in
   `Oot3dGameplayOptionBlockPcs`. `whole_aot_hook_gates.json`: 377 PCs (one new); the release build's C++
   regeneration (`generate_whole_aot_cpp.py --sparse-block-entries`) reads it, no program regeneration needed.
-- **Option and log:** checkbox under "Landing roll (N64)", applied at once; off writes `config/no_n64_idle_animations`.
-  Game log `gameplay: ... n64_idle_animations=on|off ...`. Cost: one hook per fidget choice (every other idle cycle).
+- **Option and log:** "Idle animations" under "Landing roll (N64)", applied at once: **N64** (default, no file),
+  **N64 and 3DS, at random** (`mixed`: each choice of one of the two fidgets skips the swap at even odds, from a host
+  xorshift so the game's own random state is untouched; user: "could we have N64 animations but then also random
+  N64+3DS option?") and **3DS** (`3ds`: the swap stays). Game log `gameplay: ... idle_animations=n64|mixed|3ds ...`.
+  Cost: one hook per fidget choice (every other idle cycle).
 - **Check [not done on the console]:** child, Link's house, stand still unarmed for ~1 minute: besides the look-around,
   tunic and foot-tap fidgets, Link stretches with the relax voice (OoT3D: the tunic instead). Same as adult in
   Kakariko. Sword and shield drawn, stand still: Link adjusts his shield with the shield sounds (OoT3D: the sword
-  swing); with only a sword drawn (no shield owned) N64 also shows it. Option off: the old OoT3D fidgets.
+  swing); with only a sword drawn (no shield owned) N64 also shows it. 3DS: the old OoT3D fidgets; at random: both.
 - Tests: `oot3d_n64_idle_animations_tests` (every fidget type × modelAnimType against a model of the game's block with
-  and without the swap; the two animations; refusals; the config file). Guards "N64 idle animations".
+  and without the swap; the two animations; refusals; the three settings and the coin; the config file).
 
 ### TAS shader corpus: 81 texts from a Citra replay with this fork's generator (user, 11/13)
 - **Why:** missing shaders were found one area at a time from players' logs. Upstream (coccofresco) ships a

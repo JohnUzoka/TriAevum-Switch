@@ -3,12 +3,14 @@
 // game's block with and without OoT3D's swap, and the config file.
 #include "oot3d_n64_idle_animations.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <map>
 
 namespace {
@@ -192,18 +194,44 @@ void TestRefusals() {
   refused(noColumn, Registers(5U), "the block's other load unreadable");
 }
 
+void TestSetting() {
+  Require(IdleAnimationsSetting().load() == IdleAnimations::N64, "N64 by default");
+  for (std::uint32_t coin : {0U, 1U, 0xFFFFFFFEU, 0xFFFFFFFFU}) {
+    Require(UseN64IdleFidget(IdleAnimations::N64, coin), "N64: always the N64 fidget");
+    Require(!UseN64IdleFidget(IdleAnimations::Original3ds, coin), "3DS: never");
+    Require(UseN64IdleFidget(IdleAnimations::Mixed, coin) == ((coin & 1U) != 0U), "mixed: the coin's bit");
+  }
+  // Mixed is about even over many choices, and neither side runs for long.
+  unsigned n64 = 0U, longest = 0U, run = 0U;
+  bool last = false;
+  for (int i = 0; i < 10000; ++i) {
+    const bool pick = UseN64IdleFidget(IdleAnimations::Mixed, IdleAnimationsCoin());
+    n64 += pick ? 1U : 0U;
+    run = i > 0 && pick == last ? run + 1U : 1U;
+    longest = std::max(longest, run);
+    last = pick;
+  }
+  Require(n64 > 4500U && n64 < 5500U, "mixed: about half N64");
+  Require(longest < 25U, "mixed: no long runs of one side");
+}
+
 void TestConfig() {
-  Require(N64IdleAnimationsEnabled().load(), "on by default");
   Require(kN64IdleAnimationsHookPc < kN64IdleAnimationsResumePc, "the hook, then past the swap");
   const auto config = std::filesystem::temp_directory_path() / "oot3d_n64_idle_animations_tests";
   std::error_code ignored;
   std::filesystem::remove_all(config, ignored);
-  Require(ReadN64IdleAnimationsEnabled(config), "no file: on");
-  Require(SaveN64IdleAnimationsEnabled(config, false) && !ReadN64IdleAnimationsEnabled(config),
-          "off writes the file");
-  Require(std::filesystem::exists(config / "no_n64_idle_animations"), "file name");
-  Require(SaveN64IdleAnimationsEnabled(config, true) && ReadN64IdleAnimationsEnabled(config), "on removes it");
-  Require(SaveN64IdleAnimationsEnabled(config, true), "on twice");
+  Require(ReadIdleAnimations(config) == IdleAnimations::N64, "no file: N64");
+  for (auto setting : {IdleAnimations::Mixed, IdleAnimations::Original3ds}) {
+    Require(SaveIdleAnimations(config, setting) && ReadIdleAnimations(config) == setting, "a choice round-trips");
+    Require(std::filesystem::exists(config / "idle_animations"), "file name");
+  }
+  Require(SaveIdleAnimations(config, IdleAnimations::N64) && ReadIdleAnimations(config) == IdleAnimations::N64 &&
+              !std::filesystem::exists(config / "idle_animations"),
+          "N64 removes the file");
+  Require(SaveIdleAnimations(config, IdleAnimations::N64), "N64 twice");
+  std::filesystem::create_directories(config);
+  { std::ofstream(config / "idle_animations") << "something\n"; }
+  Require(ReadIdleAnimations(config) == IdleAnimations::N64, "an unknown word: N64");
   std::filesystem::remove_all(config, ignored);
 }
 
@@ -213,6 +241,7 @@ int main() {
   TestEveryFidget();
   TestTheTwoAnimations();
   TestRefusals();
+  TestSetting();
   TestConfig();
   std::puts("oot3d_n64_idle_animations_tests: ok");
   return 0;
