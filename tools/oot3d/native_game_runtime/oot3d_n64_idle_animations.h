@@ -1,7 +1,7 @@
 #pragma once
 
 // L3+R3 > Game > Gameplay > "Idle animations" (config/idle_animations: absent =
-// N64, the default; "mixed" = N64's or OoT3D's at even odds; "3ds" = OoT3D's).
+// OoT3D's, the default; "n64" = N64's; "mixed" = N64's or OoT3D's at even odds).
 //
 // Standing still, Link plays a fidget every other idle cycle. OoT3D picks it
 // as N64 does (Player_ChooseNextIdleAnim, inlined in Player_Action_Idle at
@@ -105,11 +105,12 @@ bool RestoreN64IdleFidget(Bus &memory, std::array<std::uint32_t, 16> &r) {
   return true;
 }
 
-enum class IdleAnimations : std::uint8_t { N64 = 0, Mixed = 1, Original3ds = 2 };
+// In the panel's order.
+enum class IdleAnimations : std::uint8_t { Original3ds = 0, N64 = 1, Mixed = 2 };
 
 // Read by the hook at every fidget choice, written by the panel.
 inline std::atomic<IdleAnimations> &IdleAnimationsSetting() noexcept {
-  static std::atomic<IdleAnimations> setting{IdleAnimations::N64};
+  static std::atomic<IdleAnimations> setting{IdleAnimations::Original3ds};
   return setting;
 }
 
@@ -132,7 +133,7 @@ inline std::uint32_t IdleAnimationsCoin() noexcept {
 }
 
 constexpr const char *IdleAnimationsName(IdleAnimations setting) noexcept {
-  return setting == IdleAnimations::Mixed ? "mixed" : setting == IdleAnimations::Original3ds ? "3ds" : "n64";
+  return setting == IdleAnimations::Mixed ? "mixed" : setting == IdleAnimations::N64 ? "n64" : "3ds";
 }
 
 inline constexpr const char *kIdleAnimationsConfigName = "idle_animations";
@@ -140,16 +141,16 @@ inline constexpr const char *kIdleAnimationsConfigName = "idle_animations";
 inline IdleAnimations ReadIdleAnimations(const std::filesystem::path &config) {
   std::ifstream file(config / kIdleAnimationsConfigName);
   std::string word;
-  if (!(file >> word)) return IdleAnimations::N64;
+  if (!(file >> word)) return IdleAnimations::Original3ds;
+  if (word == "n64") return IdleAnimations::N64;
   if (word == "mixed") return IdleAnimations::Mixed;
-  if (word == "3ds") return IdleAnimations::Original3ds;
-  return IdleAnimations::N64;
+  return IdleAnimations::Original3ds;
 }
 
-// Removes the file (N64) or writes the setting's name; false if that failed.
+// Removes the file (3DS) or writes the setting's name; false if that failed.
 inline bool SaveIdleAnimations(const std::filesystem::path &config, IdleAnimations setting) {
   std::error_code error;
-  if (setting == IdleAnimations::N64) {
+  if (setting == IdleAnimations::Original3ds) {
     std::filesystem::remove(config / kIdleAnimationsConfigName, error);
     return !error;
   }

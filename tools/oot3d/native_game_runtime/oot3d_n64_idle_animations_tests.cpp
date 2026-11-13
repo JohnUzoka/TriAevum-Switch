@@ -195,7 +195,7 @@ void TestRefusals() {
 }
 
 void TestSetting() {
-  Require(IdleAnimationsSetting().load() == IdleAnimations::N64, "N64 by default");
+  Require(IdleAnimationsSetting().load() == IdleAnimations::Original3ds, "3DS by default");
   for (std::uint32_t coin : {0U, 1U, 0xFFFFFFFEU, 0xFFFFFFFFU}) {
     Require(UseN64IdleFidget(IdleAnimations::N64, coin), "N64: always the N64 fidget");
     Require(!UseN64IdleFidget(IdleAnimations::Original3ds, coin), "3DS: never");
@@ -220,18 +220,19 @@ void TestConfig() {
   const auto config = std::filesystem::temp_directory_path() / "oot3d_n64_idle_animations_tests";
   std::error_code ignored;
   std::filesystem::remove_all(config, ignored);
-  Require(ReadIdleAnimations(config) == IdleAnimations::N64, "no file: N64");
-  for (auto setting : {IdleAnimations::Mixed, IdleAnimations::Original3ds}) {
+  Require(ReadIdleAnimations(config) == IdleAnimations::Original3ds, "no file: 3DS");
+  for (auto setting : {IdleAnimations::N64, IdleAnimations::Mixed}) {
     Require(SaveIdleAnimations(config, setting) && ReadIdleAnimations(config) == setting, "a choice round-trips");
     Require(std::filesystem::exists(config / "idle_animations"), "file name");
   }
-  Require(SaveIdleAnimations(config, IdleAnimations::N64) && ReadIdleAnimations(config) == IdleAnimations::N64 &&
+  Require(SaveIdleAnimations(config, IdleAnimations::Original3ds) &&
+              ReadIdleAnimations(config) == IdleAnimations::Original3ds &&
               !std::filesystem::exists(config / "idle_animations"),
-          "N64 removes the file");
-  Require(SaveIdleAnimations(config, IdleAnimations::N64), "N64 twice");
+          "3DS removes the file");
+  Require(SaveIdleAnimations(config, IdleAnimations::Original3ds), "3DS twice");
   std::filesystem::create_directories(config);
   { std::ofstream(config / "idle_animations") << "something\n"; }
-  Require(ReadIdleAnimations(config) == IdleAnimations::N64, "an unknown word: N64");
+  Require(ReadIdleAnimations(config) == IdleAnimations::Original3ds, "an unknown word: 3DS");
   std::filesystem::remove_all(config, ignored);
 }
 

@@ -25,7 +25,7 @@ void TestLine() {
   GameplayOptionsLog log;
   const auto start = log.Take();
   Require(Contains(start, "gameplay: quick_put_away=off damage=normal master_quest_unmirrored=off ") &&
-              Contains(start, " idle_animations=n64 simple_shadow=on shadow_cutscenes=off ") &&
+              Contains(start, " idle_animations=3ds simple_shadow=on shadow_cutscenes=off ") &&
               Contains(start, "config/idle_animations"),
           "the defaults at start");
   Require(!Contains(start, "applies at the next") && !Contains(start, "shadow_method"),
