@@ -881,6 +881,16 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   the picker refused the item and let the D-pad through. `other_position` is the game's second Items
   position (`0x0050674C`, which the 2.1.1 ZR/ZL selection writes and the game reads with `0x00506748`
   at `0x00446A70`): the log tells which of the two follows the cursor.
+- **Console, 11/13 (logs41, 0.2.4-test.2):** 47 `dpad picker:` lines. On the A press the page is in
+  state 2 with `position=-1 other_position=-1`; the press then reaches the game, which moves the page
+  to state 8 with `position=1` (the Deku Nuts it picked up, to rearrange it), and every D-pad press
+  after that moves the item (`page_state=8 ... refused: not browsing the Items page`). So
+  `0x00506748` is the picked-up item, not the hovered one, and while browsing neither position is set.
+- **Fix:** the picker works on the game's own pick-up: in state 8, while A is still held, a direction
+  takes the item at `0x00506748` (same slot and age rules) and is kept from the game, so its cursor
+  stays on the item; when A is released the port sends one A press of its own a frame later, which
+  drops the item where it was, and the page browses again (if the page left state 8 or the position
+  changed meanwhile, nothing is sent). A is no longer kept from the game.
 - **Test:** `oot3d_top_screen_mod_profile_tests` (TestPicker, the log lines).
 
 ### Simple shadow flashing back to the foot spots (logs39 and three captures, 11/13)
@@ -904,6 +914,19 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   samples without their frame N` (`PlayerShadowBridge::Counters`).
 - **Test:** `oot3d_simple_shadow_tests` (TestHook: a decision serves two completed frames, a refusal
   replaces it); guard "logs39: the simple shadow dropped out ...".
+- **Console, 11/13 (logs41, 0.2.4-test.2, Texture):** "a bit better"; every published game frame had
+  a shadow (900 of 900 between each pair of `shadow:` lines, no sample without its frame).
+- **Then (user):** "glitchy when it goes under meshes" and "glitchy when time of day changes, it needs a
+  better transition".
+  - *Time of day:* the shadow took the scene's directional lights every frame, and the game swaps its
+    day and night lights in one frame. The renderer now eases the scene light toward the new one
+    (`PlayerShadowEaseLight`, time constant 0.6 s on the steady clock; a gap over 0.5 s, a menu or a
+    load, takes it at once); opposite directions pass through the vertical. Link's rise and floor are
+    applied after (`PlayerShadowSceneLightOf`, then `PlayerShadowLightDirection(scene, ...)`).
+  - *Under meshes:* the flattened body lay 0.75 units above the plane of the floor polygon under
+    Link, so terrain bumping above that plane nearby hid parts of it. `kPlayerShadowLift` is now 3
+    units [INFERENCE: what "under meshes" means was not seen; a clip would tell].
+  - Test: `oot3d_player_shadow_tests` (TestLightEasing; TestRegion's margin follows the lift).
 
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go

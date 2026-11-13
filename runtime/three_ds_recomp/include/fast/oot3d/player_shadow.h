@@ -101,8 +101,11 @@ inline constexpr float kPlayerShadowLightFull = 0.35F;
 inline constexpr float kPlayerShadowRiseStart = 40.0F;
 inline constexpr float kPlayerShadowRiseLength = 100.0F;
 inline constexpr float kPlayerShadowMinimumElevation = 0.3F;
-// The flattened body sits this far above the floor, against depth fighting.
-inline constexpr float kPlayerShadowLift = 0.75F;
+// The flattened body sits this far above the floor plane under Link,
+// against depth fighting and the terrain's small bumps around him, which
+// hid parts of it at 0.75 (user, logs41: "glitchy when it goes under
+// meshes") [INFERENCE: not seen frame by frame].
+inline constexpr float kPlayerShadowLift = 3.0F;
 // The mod's darkness at its default 100% (0x005F9E58), and its final factor.
 inline constexpr float kPlayerShadowBaseAlpha = 180.0F;
 inline constexpr float kPlayerShadowAlphaScale = 0.8F;
@@ -180,10 +183,15 @@ using Mat4 = std::array<float, 16>; // row-major, column vectors
     return t * t * (3.0F - 2.0F * t);
 }
 
-// Toward the light (world, unit), from the scene's directional lights.
-[[nodiscard]] inline std::array<float, 3> PlayerShadowLightDirection(
-    const Renderer3ds::PicaSceneDirectionalLights* lights, const std::array<float, 3>& floorNormal,
-    float height) noexcept {
+// The scene's light (world, unit, toward it) from its directional lights,
+// with the mod's tilt for weak lights, and its up: the part of the light the
+// time of day moves (PlayerShadowEaseLight eases it).
+struct PlayerShadowSceneLight {
+    std::array<float, 3> Direction{0.0F, 1.0F, 0.0F};
+    std::array<float, 3> Up{0.0F, 1.0F, 0.0F};
+};
+[[nodiscard]] inline PlayerShadowSceneLight PlayerShadowSceneLightOf(
+    const Renderer3ds::PicaSceneDirectionalLights* lights) noexcept {
     using namespace PlayerShadowDetail;
     const Vec3 up = lights != nullptr ? Normalized(lights->WorldUp).value_or(Vec3{0.0F, 1.0F, 0.0F})
                                       : Vec3{0.0F, 1.0F, 0.0F};
@@ -203,6 +211,18 @@ using Mat4 = std::array<float, 16>; // row-major, column vectors
     Vec3 direction = Normalized(sum).value_or(up);
     if (strongest < kPlayerShadowLightFull)
         direction = TiltToward(direction, up, (kPlayerShadowLightFull - strongest) / kPlayerShadowLightFull);
+    return {direction, up};
+}
+
+// Toward the light (world, unit) for Link's height and floor: the rise tilts
+// the scene light toward up, and the floor keeps it above the minimum
+// elevation.
+[[nodiscard]] inline std::array<float, 3> PlayerShadowLightDirection(const PlayerShadowSceneLight& scene,
+                                                                     const std::array<float, 3>& floorNormal,
+                                                                     float height) noexcept {
+    using namespace PlayerShadowDetail;
+    const Vec3& up = scene.Up;
+    Vec3 direction = scene.Direction;
     if (const float rise = PlayerShadowRise(height); rise > 0.0F) direction = TiltToward(direction, up, rise);
     const Vec3 normal = Normalized(floorNormal).value_or(up);
     const float elevation = Dot(direction, normal);
@@ -216,6 +236,32 @@ using Mat4 = std::array<float, 16>; // row-major, column vectors
             direction[axis] = kPlayerShadowMinimumElevation * normal[axis] + level * (*horizontal)[axis];
     }
     return direction;
+}
+
+// Toward the light (world, unit), from the scene's directional lights.
+[[nodiscard]] inline std::array<float, 3> PlayerShadowLightDirection(
+    const Renderer3ds::PicaSceneDirectionalLights* lights, const std::array<float, 3>& floorNormal,
+    float height) noexcept {
+    return PlayerShadowLightDirection(PlayerShadowSceneLightOf(lights), floorNormal, height);
+}
+
+// Time of day (user, logs41: the shadow jumped when it changed): the scene
+// light can turn far in one frame (the game swaps its day and night lights),
+// so the shadow's light follows it with this time constant; opposite
+// directions pass through the vertical (the shadow shrinks under Link and
+// grows on the other side).
+inline constexpr float kPlayerShadowLightEaseSeconds = 0.6F;
+// A gap longer than this (a menu, a scene load) takes the new light at once.
+inline constexpr float kPlayerShadowLightEaseGapSeconds = 0.5F;
+[[nodiscard]] inline std::array<float, 3> PlayerShadowEaseLight(const std::array<float, 3>& previous,
+                                                                const std::array<float, 3>& target,
+                                                                float seconds) noexcept {
+    using namespace PlayerShadowDetail;
+    if (!(seconds >= 0.0F) || seconds > kPlayerShadowLightEaseGapSeconds) return target;
+    const float share = 1.0F - std::exp(-seconds / kPlayerShadowLightEaseSeconds);
+    const Vec3 mixed{previous[0] + (target[0] - previous[0]) * share, previous[1] + (target[1] - previous[1]) * share,
+                     previous[2] + (target[2] - previous[2]) * share};
+    return Normalized(mixed).value_or(target);
 }
 
 // Row-major 4x4 (column vectors): a world point goes along `towardLight` to

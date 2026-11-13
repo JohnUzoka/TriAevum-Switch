@@ -151,7 +151,7 @@ bool ReadTopScreenDpadItemPickerState(NativeA32Memory &memory,
       !memory.Read32(kSaveContext + 0x04U, &age))
     return false;
   result.PageState = pageState;
-  result.Browsing = pageState == 2U;
+  result.PickedUp = pageState == kTopScreenItemsPickedUp;
   result.Age = age != 0U ? 1U : 0U;
   const std::uint32_t grid = kSaveContext + (result.Age != 0U ? 0x138AU : 0x13A2U);
   for (std::size_t position = 0; position < result.Grid.size(); ++position)
@@ -167,7 +167,7 @@ bool ReadTopScreenDpadItemPickerState(NativeA32Memory &memory,
 
 std::uint8_t
 ResolveTopScreenDpadItemPickerSlot(const TopScreenDpadItemPickerState &state) noexcept {
-  if (!state.Browsing || state.Position >= state.Grid.size())
+  if (!state.PickedUp || state.Position >= state.Grid.size())
     return kTopScreenDpadItemSlotNone;
   const auto slot = state.Grid[state.Position];
   if (slot >= state.Inventory.size())
@@ -188,7 +188,7 @@ std::string DescribeTopScreenDpadItemPicker(const TopScreenDpadItemPickerState &
       : kTopScreenNoItem;
   const unsigned itemAge = item <= 61U ? state.ItemAge[item] : 0xFFU;
   const char *outcome = slot != kTopScreenDpadItemSlotNone ? "takes it"
-      : !state.Browsing                     ? "refused: not browsing the Items page"
+      : !state.PickedUp                     ? "refused: no item picked up with A"
       : !inGrid                             ? "refused: no hovered position"
       : hovered >= state.Inventory.size()   ? "refused: no slot at that position"
       : item == kTopScreenNoItem            ? "refused: no item a D-pad direction can hold"

@@ -28,6 +28,7 @@
 #include "gfx_deko3d_api.h"
 #include "gfx_deko3d_player_shadow_dksh.h"
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <span>
 #include <utility>
@@ -167,8 +168,17 @@ void GfxRenderingAPIDeko3d::CapturePlayerShadowDraw(const GfxNativePicaDrawView&
         return;
     }
     if (!shadow.Projection) {
-        const auto light = Oot3d::PlayerShadowLightDirection(
-            draw.LightBinding.SceneDirectionals.get(), shadow.Selected->FloorNormal, shadow.Selected->Height);
+        auto scene = Oot3d::PlayerShadowSceneLightOf(draw.LightBinding.SceneDirectionals.get());
+        const double now =
+            std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (shadow.EasedLight && shadow.EasedLightActor == shadow.Selected->Actor)
+            scene.Direction = Oot3d::PlayerShadowEaseLight(*shadow.EasedLight, scene.Direction,
+                                                           static_cast<float>(now - shadow.EasedLightTime));
+        shadow.EasedLight = scene.Direction;
+        shadow.EasedLightTime = now;
+        shadow.EasedLightActor = shadow.Selected->Actor;
+        const auto light =
+            Oot3d::PlayerShadowLightDirection(scene, shadow.Selected->FloorNormal, shadow.Selected->Height);
         shadow.Projection = Oot3d::PlayerShadowProjection(*shadow.Selected, light);
         if (shadow.Method == Method::Cover || shadow.Method == Method::Texture) {
             shadow.Region = Oot3d::PlayerShadowFloorRegion(*shadow.Selected, light);

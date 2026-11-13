@@ -77,6 +77,33 @@ void TestLightDirection() {
   Require(Near(PlayerShadowLightDirection(&twoLights, up, 0.0F), up), "opposed lights of one energy");
 }
 
+// logs41: the shadow jumped when the time of day changed its light.
+void TestLightEasing() {
+  const float s = std::sqrt(0.5F);
+  const Vec3 east{s, s, 0.0F};
+  const Vec3 west{-s, s, 0.0F};
+  Require(Near(PlayerShadowEaseLight(east, west, 0.0F), east), "no time: the light stays");
+  const auto step = PlayerShadowEaseLight(east, west, 1.0F / 60.0F);
+  Require(step[0] > 0.6F && step[0] < s && Near(step[0] * step[0] + step[1] * step[1], 1.0F, 1.0e-3F),
+          "one frame: a small turn toward the new light");
+  Vec3 light = east;
+  float lowest = 1.0F;
+  bool vertical = false;
+  for (int frame = 0; frame < 180; ++frame) {
+    light = PlayerShadowEaseLight(light, west, 1.0F / 60.0F);
+    lowest = std::min(lowest, light[1]);
+    vertical = vertical || std::abs(light[0]) < 0.05F;
+  }
+  Require(vertical && lowest >= s - 1.0e-3F, "opposite lights: through the vertical, never lower");
+  Require(Near(light, west, 0.02F), "three seconds: the new light");
+  Require(Near(PlayerShadowEaseLight(east, west, kPlayerShadowLightEaseGapSeconds + 0.1F), west),
+          "after a gap (a menu, a load): the new light at once");
+  Fast::Renderer3ds::PicaSceneDirectionalLights none;
+  Require(Near(PlayerShadowLightDirection(PlayerShadowSceneLightOf(&none), {0.0F, 1.0F, 0.0F}, 0.0F),
+               PlayerShadowLightDirection(&none, {0.0F, 1.0F, 0.0F}, 0.0F)),
+          "the scene light, then Link's height and floor, as in one step");
+}
+
 void TestProjection() {
   PlayerShadowFrame frame;
   frame.FloorPoint = {10.0F, 5.0F, -3.0F};
@@ -231,7 +258,9 @@ void TestRegion() {
   Require(slanted && slanted->Along[0] < -0.99F, "the shadow falls away from the light");
   Require(slanted->AlongRange[1] - slanted->AlongRange[0] > slanted->AcrossRange[1] - slanted->AcrossRange[0],
           "longer along the shadow");
-  Require(slanted->AlongRange[0] > -kPlayerShadowBodyRadius - 1.0F,
+  // The floor itself is kPlayerShadowLift under the plane: at 45 degrees its
+  // points land that far toward the light, and nothing lower counts.
+  Require(slanted->AlongRange[0] > -kPlayerShadowBodyRadius - kPlayerShadowLift - 1.0F,
           "nothing under the floor stretches it toward the light");
 }
 
@@ -374,6 +403,7 @@ void TestBridge() {
 int main() {
   TestOpacity();
   TestLightDirection();
+  TestLightEasing();
   TestProjection();
   TestPatch();
   TestRegion();

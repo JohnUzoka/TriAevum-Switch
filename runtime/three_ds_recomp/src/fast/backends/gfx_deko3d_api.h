@@ -460,6 +460,11 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         // Methods cover and texture: the floor region and the camera of his first draw.
         std::optional<Oot3d::PlayerShadowRegion> Region;
         std::optional<std::array<float, 16>> WorldToClip;
+        // The scene light the shadow follows (PlayerShadowEaseLight), when it
+        // was taken (steady clock, seconds) and for which actor.
+        std::optional<std::array<float, 3>> EasedLight;
+        double EasedLightTime = 0.0;
+        uint32_t EasedLightActor = 0;
         std::vector<PlayerShadowDraw> Draws;
         // A draw of the frame tests or writes the top stencil bit, which two
         // passes and cover borrow: that frame they draw in one pass.
