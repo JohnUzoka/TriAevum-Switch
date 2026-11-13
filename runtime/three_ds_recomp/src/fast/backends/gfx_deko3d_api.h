@@ -460,6 +460,7 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         // Methods cover and texture: the floor region and the camera of his first draw.
         std::optional<Oot3d::PlayerShadowRegion> Region;
         std::optional<std::array<float, 16>> WorldToClip;
+        std::optional<std::array<float, 3>> Light; // toward it, as Projection took it
         // The scene light the shadow follows (PlayerShadowEaseLight), when it
         // was taken (steady clock, seconds) and for which actor.
         std::optional<std::array<float, 3>> EasedLight;
@@ -480,6 +481,9 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         const DkShader* CoverVertex = nullptr; // method cover
         const DkShader* FloorVertex = nullptr; // method texture
         const DkShader* FloorFragment = nullptr;
+        const DkShader* DecalFragment = nullptr; // method decal (the cover triangle's vertex stage)
+        // Method decal: a texture slot per target (PicaTarget::Id) viewing its depth.
+        std::unordered_map<uint64_t, uint32_t> DepthSlots;
         // Method texture: the silhouette, drawn and then sampled at each draw point.
         DkMemBlock SilhouetteMemory = nullptr;
         DkImage SilhouetteImage{};
@@ -503,6 +507,8 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
                                  const Deko3d::PicaTarget& target, const PlayerShadowDraw& bound);
     // At a draw point into `target`: the captured draws, once per frame.
     void DrawPlayerShadow(Deko3d::PicaTarget& target);
+    // Method decal: the texture slot of `target`'s depth (kMaxImages when none is free).
+    uint32_t PlayerShadowDepthSlot(const Deko3d::PicaTarget& target);
     // Method texture, at a draw point: the draws flat into the silhouette,
     // whose target stays bound (the caller binds the scene target again).
     void DrawPlayerShadowSilhouette(const std::vector<PlayerShadowDraw>& draws);

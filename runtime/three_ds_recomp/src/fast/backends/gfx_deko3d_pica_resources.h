@@ -195,6 +195,8 @@ class PicaResources {
         }
     }
     void WriteImageDescriptor(uint32_t slot, const DkImage& image);
+    // A prepared view (e.g. the depth of a depth-stencil image, DkDsSource_Depth).
+    void WriteImageDescriptor(uint32_t slot, const DkImageView& view);
     // The descriptor slot of a sampler state (deduplicated).
     uint32_t SamplerSlot(const PicaSamplerKey& key);
 

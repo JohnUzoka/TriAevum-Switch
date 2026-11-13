@@ -931,6 +931,33 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
     on the game's depth direction, not settled from the code.
   - Test: `oot3d_player_shadow_tests` (TestLightEasing; TestRegion's margin follows the lift).
 
+### Simple shadow, method Decal: cast on the ground, steps and walls (user, logs42, 11/13)
+- **Seen:** "half of his shadow goes under the ground", and "his shadow doesn't cut off or wrap around
+  ... floors or walls" (with clips, `Images/13/`; the user: it never wrapped). The first four methods
+  flatten Link onto one plane through the floor point under him: rising ground covers part of it,
+  and it cannot bend over a step or a wall nor end at a ledge. Raising the plane (0.2.4-test.3) only
+  made it float.
+- **What games do cheaply:** a projected decal. `L3+R3 > Video > Shadow method > Decal (follows the
+  ground and walls)` (`config/simple_shadow_method` `decal`): the Texture method's silhouette (256x256,
+  Link flattened along the light), then one triangle over the screen rectangle of the region's box
+  (its footprint from 60 below the plane to 110 above, `PlayerShadowDecalScreenRect`), whose fragment
+  stage (`player_shadow_decal_fsh.glsl`, 2 KB) reads the scene's depth at the pixel, takes it back to
+  the world point (`ClipToWorld = inverse(WorldToClip)`, PICA depth = -z/w with the -1..1 depth mode),
+  and darkens it by the silhouette where the light takes that point onto the plane. Rules
+  (`PlayerShadowDecalLookup`, the same on the host): only points 60 below to 110 above the plane, with
+  a 10-unit fade at both ends (so the shadow stops past a ledge); none on the light's side of his
+  middle (25 above him), which keeps it off things between him and the light; none on Link himself (a
+  cylinder of radius 18 from 1 to 80 above his position).
+- **Depth on deko3d:** the targets' Z24S8 images are compressed (`DkImageFlags_HwCompression`):
+  `dkCmdBufResolveDepthValues` first, a fragment barrier invalidating images and descriptors, then
+  only the colour is bound while the triangle samples a `DkDsSource_Depth` view of the same image
+  (one texture slot per target, `PlayerShadowDepthSlot`), and a fragment barrier before the next draw
+  writes depth again. Not seen on a console yet [the pieces exist in deko3d; whether the resolve is
+  enough for this image is the open question].
+- **Test:** `oot3d_player_shadow_tests` (TestDecal: depth back to the world point, the floor, a step
+  and a wall behind him, nothing between him and the light, not on him, nothing past the range, the
+  fade); guards "logs42 (user): the flat shadow ..." and "method decal's shader ...".
+
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go
   underground" in the Forest Temple.

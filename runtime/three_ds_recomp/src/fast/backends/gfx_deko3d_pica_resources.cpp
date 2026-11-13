@@ -214,6 +214,10 @@ void PicaResources::Shutdown() noexcept {
 void PicaResources::WriteImageDescriptor(uint32_t slot, const DkImage& image) {
     DkImageView view;
     dkImageViewDefaults(&view, &image);
+    WriteImageDescriptor(slot, view);
+}
+
+void PicaResources::WriteImageDescriptor(uint32_t slot, const DkImageView& view) {
     DkImageDescriptor descriptor;
     dkImageDescriptorInitialize(&descriptor, &view, false, false);
     std::memcpy(&mImageDescriptors[slot], &descriptor, sizeof(descriptor));

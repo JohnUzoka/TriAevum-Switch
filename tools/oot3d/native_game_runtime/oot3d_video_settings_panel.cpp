@@ -329,7 +329,7 @@ private:
     }
     auto &bridge = Fast::Oot3d::PlayerShadowBridge::Instance();
     const char *const methods[] = {"Two passes", "One pass (overlaps darker)", "Mark, then cover (default)",
-                                   "Texture (soft edges)"};
+                                   "Texture (soft edges)", "Decal (follows the ground and walls)"};
     static_assert(std::size(methods) == Fast::Oot3d::kPlayerShadowMethodCount);
     int method = static_cast<int>(bridge.Method());
     if (ImGui::Combo("Shadow method", &method, methods, static_cast<int>(std::size(methods)))) {
@@ -351,11 +351,13 @@ private:
     ImGui::TextDisabled("Applies at once. Link's whole body casts his shadow along the scene's light, "
                         "instead of the two spots under his feet (Single Screen Experience's Simple "
                         "shadows). deko3d renderer only; drawing Link twice costs some GPU time.");
-    ImGui::TextDisabled("Shadow method: the same shadow drawn four ways. Mark, then cover looks like Two "
-                        "passes at about half the GPU time; One pass is as cheap but darkens overlapping "
-                        "limbs twice; Texture has soft edges, as in Single Screen Experience (the log's "
-                        "dkperf lines: shadow_<method>_ms). Cutscenes keep the game's foot shadows unless "
-                        "Shadow in cutscenes is on.");
+    ImGui::TextDisabled("Shadow method: the same shadow drawn five ways. The first four lay it flat on "
+                        "the ground under Link: Mark, then cover looks like Two passes at about half the GPU "
+                        "time; One pass is as cheap but darkens overlapping limbs twice; Texture has soft "
+                        "edges, as in Single Screen Experience. Decal casts it on whatever is there, slopes, "
+                        "steps and walls included, and stops at a ledge (the log's dkperf lines: "
+                        "shadow_<method>_ms). Cutscenes keep the game's foot shadows unless Shadow in "
+                        "cutscenes is on.");
 #endif
   }
 

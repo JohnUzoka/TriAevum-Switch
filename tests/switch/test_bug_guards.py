@@ -134,6 +134,24 @@ GUARDS = [
           "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.cpp",
           r'result\.PickedUp = pageState == kTopScreenItemsPickedUp;.*?if \(!state\.PickedUp \|\| state\.Position >= state\.Grid\.size\(\)\)',
           "oot3d_top_screen_mod_profile_tests (TestPicker)"),
+    Guard("logs42 (user): the flat shadow went half under rising ground and never bent over steps or walls; "
+          "method decal resolves the scene's depth, samples it with only the colour bound and casts the "
+          "silhouette on each pixel's world point",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
+          r'case Method::Decal: \{.*?PlayerShadowDepthSlot\(target\).*?dkCmdBufResolveDepthValues\(cmd\);\s+'
+          r'dkCmdBufBarrier\(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image \| DkInvalidateFlags_Descriptors\);.*?'
+          r'dkCmdBufBindRenderTargets\(cmd, colors, 1, nullptr\);\s+mBoundTarget = nullptr;.*?'
+          r'shadow\.CoverVertex, shadow\.DecalFragment',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("method decal's shader keeps PlayerShadowDecalLookup's rules: the height range, not toward the light "
+          "from Link, not Link himself, along the light into the silhouette",
+          "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
+          r'vec4 world = clip_to_world \* vec4\(x, y, -depth, 1\.0\);.*?'
+          r'if \(height < extent\.z \|\| height > extent\.w\) discard;.*?'
+          r'if \(dot\(p - middle\.xyz, toward_light\.xyz\) > 0\.0\) discard;.*?'
+          r'up > 1\.0 && up < middle\.w\) discard;.*?'
+          r'vec3 flat_point = relative - toward_light\.xyz \* \(height / normal\.w\);',
+          "oot3d_player_shadow_tests (TestDecal)"),
     Guard("logs41: the simple shadow jumped when the time of day changed the scene light; it eases toward it",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
           r'auto scene = Oot3d::PlayerShadowSceneLightOf\(.*?scene\.Direction = Oot3d::PlayerShadowEaseLight\(.*?'
@@ -2549,7 +2567,7 @@ GUARDS = [
           r'if \(shadow\.SilhouetteFrame == mDevice\.Frame\(\)\) dkCmdBufBarrier\(cmd, DkBarrier_Fragments, 0\);.*?'
           r'dkCmdBufBindRenderTargets\(cmd, colors, 1, nullptr\);\s+mBoundTarget = nullptr;.*?'
           r'dkCmdBufBarrier\(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image\);.*?'
-          r'if \(method == Method::Texture\) DrawPlayerShadowSilhouette\(draws\);\s+BindPicaTarget\(target\);',
+          r'if \(method == Method::Texture \|\| method == Method::Decal\) DrawPlayerShadowSilhouette\(draws\);\s+BindPicaTarget\(target\);',
           "oot3d_player_shadow_tests (TestSilhouette)"),
     Guard("Simple shadow: a frame whose draws use the top stencil bit keeps it (two passes and cover draw in one "
           "pass then, not dropped: the foot shadows are hidden already)",

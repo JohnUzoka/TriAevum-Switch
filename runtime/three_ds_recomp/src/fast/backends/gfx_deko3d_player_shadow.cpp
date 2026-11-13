@@ -42,6 +42,7 @@ constexpr uint64_t kPlayerShadowFragmentKey = 0xDE0C3D5AD0500001ULL;
 constexpr uint64_t kPlayerShadowCoverVertexKey = 0xDE0C3D5AD0500002ULL;
 constexpr uint64_t kPlayerShadowFloorVertexKey = 0xDE0C3D5AD0500003ULL;
 constexpr uint64_t kPlayerShadowFloorFragmentKey = 0xDE0C3D5AD0500004ULL;
+constexpr uint64_t kPlayerShadowDecalFragmentKey = 0xDE0C3D5AD0500005ULL;
 constexpr uint8_t kPlayerShadowStencilBit = 0x80U;
 // Method texture: the silhouette's side, in texels.
 constexpr uint32_t kPlayerShadowSilhouetteSize = 256U;
@@ -55,6 +56,22 @@ struct PlayerShadowFloorUniforms {
     float Shade[4];        // x: opacity, y, z: one texel
 };
 static_assert(sizeof(PlayerShadowFloorUniforms) == 144U, "the std140 block PlayerShadowFloor");
+
+// player_shadow_decal_fsh.glsl: binding 0 of its fragment stage (std140).
+struct PlayerShadowDecalUniforms {
+    float ClipToWorld[16]; // column-major (GLSL mat4)
+    float Viewport[4];
+    float Origin[4];       // w: 1 when NDC y = -1 is the viewport's first row
+    float Normal[4];       // w: toward light . normal
+    float TowardLight[4];
+    float Along[4];        // w: first along
+    float Across[4];       // w: first across
+    float Extent[4];       // 1 / along length, 1 / across length, lowest, highest
+    float Link[4];         // w: his radius
+    float Middle[4];       // w: his height
+    float Shade[4];        // opacity, one texel, the fade's length
+};
+static_assert(sizeof(PlayerShadowDecalUniforms) == 224U, "the std140 block PlayerShadowDecal");
 
 // The pixels both rectangles hold (none: zero width).
 DkScissor Intersect(const DkScissor& a, const DkScissor& b) {
@@ -95,6 +112,8 @@ void GfxRenderingAPIDeko3d::InitPlayerShadow() {
         mShaders.Embedded(kPlayerShadowFloorVertexKey, std::span<const uint8_t>(kPlayerShadowFloorVertexDksh));
     shadow.FloorFragment =
         mShaders.Embedded(kPlayerShadowFloorFragmentKey, std::span<const uint8_t>(kPlayerShadowFloorFragmentDksh));
+    shadow.DecalFragment =
+        mShaders.Embedded(kPlayerShadowDecalFragmentKey, std::span<const uint8_t>(kPlayerShadowDecalFragmentDksh));
     // Method texture's silhouette: drawn, then sampled (its red channel);
     // uncompressed, its own block.
     DkImageLayoutMaker maker;
@@ -120,12 +139,13 @@ void GfxRenderingAPIDeko3d::InitPlayerShadow() {
         }
     }
     Oot3d::PlayerShadowBridge::Instance().SetRendererReady(mPlayerShadow.Fragment != nullptr);
-    Log("shadow: fragment program %s (%zu B); cover %s; texture %s (silhouette %ux%u %s)",
+    Log("shadow: fragment program %s (%zu B); cover %s; texture %s (silhouette %ux%u %s); decal %s",
         shadow.Fragment != nullptr ? "ready" : "MISSING", sizeof(kPlayerShadowFragmentDksh),
         shadow.CoverVertex != nullptr ? "ready" : "MISSING",
         shadow.FloorVertex != nullptr && shadow.FloorFragment != nullptr ? "ready" : "MISSING",
         kPlayerShadowSilhouetteSize, kPlayerShadowSilhouetteSize,
-        shadow.SilhouetteMemory != nullptr ? "ready" : "MISSING");
+        shadow.SilhouetteMemory != nullptr ? "ready" : "MISSING",
+        shadow.DecalFragment != nullptr ? "ready" : "MISSING");
 }
 
 void GfxRenderingAPIDeko3d::ObservePlayerShadowDraw(const GfxNativePicaDrawView& draw) {
@@ -139,6 +159,7 @@ void GfxRenderingAPIDeko3d::ObservePlayerShadowDraw(const GfxNativePicaDrawView&
         shadow.Projection.reset();
         shadow.Region.reset();
         shadow.WorldToClip.reset();
+        shadow.Light.reset();
         shadow.Draws.clear();
         shadow.StencilTaken = false;
     }
@@ -180,7 +201,8 @@ void GfxRenderingAPIDeko3d::CapturePlayerShadowDraw(const GfxNativePicaDrawView&
         const auto light =
             Oot3d::PlayerShadowLightDirection(scene, shadow.Selected->FloorNormal, shadow.Selected->Height);
         shadow.Projection = Oot3d::PlayerShadowProjection(*shadow.Selected, light);
-        if (shadow.Method == Method::Cover || shadow.Method == Method::Texture) {
+        shadow.Light = light;
+        if (shadow.Method == Method::Cover || shadow.Method == Method::Texture || shadow.Method == Method::Decal) {
             shadow.Region = Oot3d::PlayerShadowFloorRegion(*shadow.Selected, light);
             shadow.WorldToClip =
                 Oot3d::PlayerShadowWorldToClip(draw.VertexUniformBytes, *draw.LightBinding.WorldToView);
@@ -208,9 +230,10 @@ void GfxRenderingAPIDeko3d::CapturePlayerShadowDraw(const GfxNativePicaDrawView&
     record.Vertex = program.Vertex;
     record.Uniforms = patched(false);
     record.UniformBytes = aligned;
-    if (shadow.Method == Method::Texture && shadow.Region) record.SilhouetteUniforms = patched(true);
+    const bool silhouette = shadow.Method == Method::Texture || shadow.Method == Method::Decal;
+    if (silhouette && shadow.Region) record.SilhouetteUniforms = patched(true);
     if (record.Uniforms == DK_GPU_ADDR_INVALID ||
-        (shadow.Method == Method::Texture && shadow.Region && record.SilhouetteUniforms == DK_GPU_ADDR_INVALID)) {
+        (silhouette && shadow.Region && record.SilhouetteUniforms == DK_GPU_ADDR_INVALID)) {
         ++shadow.Skipped;
         return;
     }
@@ -282,6 +305,24 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadowSilhouette(const std::vector<PlayerS
     dkCmdBufBarrier(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image);
 }
 
+uint32_t GfxRenderingAPIDeko3d::PlayerShadowDepthSlot(const PicaTarget& target) {
+    auto& slots = mPlayerShadow.DepthSlots;
+    if (const auto found = slots.find(target.Id); found != slots.end()) return found->second;
+    // Targets are made at a scene's start; a long list is mostly gone ones.
+    if (slots.size() >= 8U) {
+        for (const auto& [id, slot] : slots) mResources.FreeImageSlot(slot);
+        slots.clear();
+    }
+    const uint32_t slot = mResources.AllocateImageSlot();
+    if (slot >= PicaResources::kMaxImages) return slot;
+    DkImageView view;
+    dkImageViewDefaults(&view, &target.DepthStencil);
+    view.dsSource = DkDsSource_Depth;
+    mResources.WriteImageDescriptor(slot, view);
+    slots.emplace(target.Id, slot);
+    return slot;
+}
+
 void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     auto& shadow = mPlayerShadow;
     if (shadow.Frame != mDevice.Frame() || shadow.Draws.empty()) return;
@@ -301,7 +342,9 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     const bool regionKnown = shadow.Region.has_value() && shadow.WorldToClip.has_value();
     if ((method == Method::Cover && (!regionKnown || shadow.CoverVertex == nullptr)) ||
         (method == Method::Texture && (!regionKnown || shadow.FloorVertex == nullptr ||
-                                       shadow.FloorFragment == nullptr || shadow.SilhouetteMemory == nullptr)))
+                                       shadow.FloorFragment == nullptr || shadow.SilhouetteMemory == nullptr)) ||
+        (method == Method::Decal && (!regionKnown || shadow.CoverVertex == nullptr ||
+                                     shadow.DecalFragment == nullptr || shadow.SilhouetteMemory == nullptr)))
         method = Method::TwoPass;
     // A frame whose own draws use the top stencil bit keeps it: the methods
     // that borrow it draw in one pass (overlapping limbs darker) rather than
@@ -319,7 +362,7 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
 
     DkCmdBuf cmd = mDevice.Cmd();
     mDevice.MarkShadowStart();
-    if (method == Method::Texture) DrawPlayerShadowSilhouette(draws);
+    if (method == Method::Texture || method == Method::Decal) DrawPlayerShadowSilhouette(draws);
     BindPicaTarget(target);
     ++target.Version;
     if (stencil && shadow.StencilShared && shadow.StencilClean.insert(&target).second) {
@@ -469,6 +512,74 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
                         static_cast<float>(first.Viewport.Width), static_cast<float>(first.Viewport.Height));
         dkCmdBufSetScissors(cmd, 0, &first.Scissor, 1);
         dkCmdBufDraw(cmd, DkPrimitive_TriangleStrip, 4, 1, 0, 0);
+        break;
+    }
+    case Method::Decal: {
+        // One triangle over the box's screen rectangle reads the scene's depth
+        // (resolved, then sampled with only the colour bound) and casts the
+        // silhouette on it (player_shadow_decal_fsh.glsl).
+        const auto decal = shadow.Light ? Oot3d::PlayerShadowDecalOf(*shadow.Selected, *shadow.Region, *shadow.Light,
+                                                                   *shadow.WorldToClip)
+                                        : std::nullopt;
+        const uint32_t depthSlot = decal ? PlayerShadowDepthSlot(target) : PicaResources::kMaxImages;
+        if (!decal || depthSlot >= PicaResources::kMaxImages) break;
+        const bool minusOneFirst = Deko3d::ClipYSwizzleNegates(mFlipY);
+        const std::array<float, 4> viewport{
+            static_cast<float>(first.Viewport.X), static_cast<float>(first.Viewport.Y),
+            static_cast<float>(first.Viewport.Width), static_cast<float>(first.Viewport.Height)};
+        DkScissor area = first.Scissor;
+        if (const auto rect =
+                Oot3d::PlayerShadowDecalScreenRect(*shadow.WorldToClip, *decal, *shadow.Region, viewport, minusOneFirst))
+            area = Intersect(area, WithinTarget(*rect, target.Extent.Width, target.Extent.Height));
+        if (area.width == 0U || area.height == 0U) break;
+        PlayerShadowDecalUniforms block{};
+        for (size_t row = 0; row < 4U; ++row)
+            for (size_t column = 0; column < 4U; ++column)
+                block.ClipToWorld[column * 4U + row] = decal->ClipToWorld[row * 4U + column];
+        std::copy(viewport.begin(), viewport.end(), block.Viewport);
+        const auto put = [](float* out, const std::array<float, 3>& xyz, float w) {
+            out[0] = xyz[0];
+            out[1] = xyz[1];
+            out[2] = xyz[2];
+            out[3] = w;
+        };
+        put(block.Origin, decal->Origin, minusOneFirst ? 1.0F : 0.0F);
+        put(block.Normal, decal->Normal, decal->Rise);
+        put(block.TowardLight, decal->TowardLight, 0.0F);
+        put(block.Along, decal->Along, decal->AlongRange[0]);
+        put(block.Across, decal->Across, decal->AcrossRange[0]);
+        block.Extent[0] = 1.0F / (decal->AlongRange[1] - decal->AlongRange[0]);
+        block.Extent[1] = 1.0F / (decal->AcrossRange[1] - decal->AcrossRange[0]);
+        block.Extent[2] = decal->Lowest;
+        block.Extent[3] = decal->Highest;
+        put(block.Link, decal->Link, Oot3d::kPlayerShadowDecalLinkRadius);
+        put(block.Middle, decal->Middle, Oot3d::kPlayerShadowDecalLinkTall);
+        block.Shade[0] = opacity;
+        block.Shade[1] = 1.0F / static_cast<float>(kPlayerShadowSilhouetteSize);
+        block.Shade[2] = Oot3d::kPlayerShadowDecalFade;
+        const uint32_t blockBytes = AlignUp(static_cast<uint32_t>(sizeof(block)), DK_UNIFORM_BUF_ALIGNMENT);
+        const StreamSpan uniforms = mDevice.Stream(blockBytes, DK_UNIFORM_BUF_ALIGNMENT);
+        if (uniforms.Cpu == nullptr) break;
+        std::memcpy(uniforms.Cpu, &block, sizeof(block));
+        dkCmdBufResolveDepthValues(cmd);
+        dkCmdBufBarrier(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors);
+        const DkImageView* colors[] = {&target.ColorView};
+        dkCmdBufBindRenderTargets(cmd, colors, 1, nullptr);
+        mBoundTarget = nullptr; // the scene target, depth included, is bound again after
+        bindDepthStencil(false, DkCompareOp_Always, false, DkStencilOp_Keep, DkCompareOp_Always);
+        const DkShader* shaders[] = {shadow.CoverVertex, shadow.DecalFragment};
+        dkCmdBufBindShaders(cmd, DkStageFlag_Vertex | DkStageFlag_Fragment, shaders, 2);
+        dkCmdBufBindUniformBuffer(cmd, DkStage_Fragment, 0, uniforms.Gpu, blockBytes);
+        dkCmdBufBindTexture(cmd, DkStage_Fragment, 0, dkMakeTextureHandle(shadow.SilhouetteSlot, mLinearClampSampler));
+        dkCmdBufBindTexture(cmd, DkStage_Fragment, 1, dkMakeTextureHandle(depthSlot, mLinearClampSampler));
+        dkCmdBufBindVtxAttribState(cmd, nullptr, 0);
+        dkCmdBufBindVtxBufferState(cmd, nullptr, 0);
+        ApplyDkViewport(cmd, static_cast<float>(area.x), static_cast<float>(area.y), static_cast<float>(area.width),
+                        static_cast<float>(area.height));
+        dkCmdBufSetScissors(cmd, 0, &area, 1);
+        dkCmdBufDraw(cmd, DkPrimitive_Triangles, 3, 1, 0, 0);
+        // Its next draws read the depth as an attachment again.
+        dkCmdBufBarrier(cmd, DkBarrier_Fragments, 0);
         break;
     }
     }

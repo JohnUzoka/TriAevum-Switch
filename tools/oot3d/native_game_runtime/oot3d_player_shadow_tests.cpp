@@ -28,6 +28,12 @@ bool Near(const Vec3 &a, const Vec3 &b, float tolerance = 1.0e-4F) {
   return Near(a[0], b[0], tolerance) && Near(a[1], b[1], tolerance) && Near(a[2], b[2], tolerance);
 }
 
+std::array<float, 4> Apply4(const Mat4 &m, const Vec3 &v) {
+  std::array<float, 4> out{};
+  for (size_t row = 0; row < 4U; ++row)
+    out[row] = m[row * 4U] * v[0] + m[row * 4U + 1U] * v[1] + m[row * 4U + 2U] * v[2] + m[row * 4U + 3U];
+  return out;
+}
 Vec3 Apply(const Mat4 &m, const Vec3 &v) {
   Vec3 out{};
   for (size_t row = 0; row < 3U; ++row)
@@ -102,6 +108,45 @@ void TestLightEasing() {
   Require(Near(PlayerShadowLightDirection(PlayerShadowSceneLightOf(&none), {0.0F, 1.0F, 0.0F}, 0.0F),
                PlayerShadowLightDirection(&none, {0.0F, 1.0F, 0.0F}, 0.0F)),
           "the scene light, then Link's height and floor, as in one step");
+}
+
+// logs42 (user): the flat methods' shadow went half under rising ground and
+// never bent over steps or walls; method Decal casts it on the scene's points.
+void TestDecal() {
+  const Mat4 worldToClip{1.2F, 0.0F, 0.1F, 3.0F,   0.0F, 1.5F, 0.2F, -2.0F,
+                         0.05F, 0.02F, -0.5F, -5.0F, 0.0F, 0.0F, -1.0F, 0.0F};
+  PlayerShadowFrame frame;
+  frame.FloorPoint = {0.0F, 0.0F, 0.0F};
+  frame.FloorNormal = {0.0F, 1.0F, 0.0F};
+  const float s = std::sqrt(0.5F);
+  const Vec3 light{s, s, 0.0F};
+  const auto region = PlayerShadowFloorRegion(frame, light);
+  Require(region.has_value(), "decal: the region");
+  const auto decal = PlayerShadowDecalOf(frame, *region, light, worldToClip);
+  Require(decal.has_value() && Near(decal->Rise, s), "decal: its parameters");
+
+  // The scene's depth back to the world point (PICA depth = -z/w).
+  const Vec3 point{3.0F, 4.0F, -20.0F};
+  const auto clip = Apply4(worldToClip, point);
+  const auto back = PlayerShadowDecalWorldPoint(*decal, clip[0] / clip[3], clip[1] / clip[3], -clip[2] / clip[3]);
+  Require(back && Near(*back, point, 1.0e-2F), "decal: a pixel's depth gives back its world point");
+
+  const float lift = kPlayerShadowLift;
+  const auto head = PlayerShadowDecalLookup(*decal, {-(50.0F - lift), 0.0F, 0.0F});
+  Require(head.has_value() && head->Strength > 0.9F, "decal: the floor where his head's shadow falls");
+  const auto step = PlayerShadowDecalLookup(*decal, {-30.0F, 20.0F, 0.0F});
+  Require(step.has_value(), "decal: a step behind him takes the shadow");
+  const auto wall = PlayerShadowDecalLookup(*decal, {-40.0F, 30.0F, 0.0F});
+  Require(wall.has_value(), "decal: a wall behind him takes the shadow");
+  // The step at 20 and the floor under the same flattened point read the same texel.
+  const auto stepFloor = PlayerShadowDecalLookup(*decal, {-30.0F - 20.0F, 0.0F, 0.0F});
+  Require(stepFloor && Near(step->Uv[0], stepFloor->Uv[0], 1.0e-3F) && Near(step->Uv[1], stepFloor->Uv[1], 1.0e-3F),
+          "decal: a raised point reads the silhouette where the light takes it to the plane");
+  Require(!PlayerShadowDecalLookup(*decal, {30.0F, 20.0F, 0.0F}), "decal: nothing between him and the light");
+  Require(!PlayerShadowDecalLookup(*decal, {2.0F, 30.0F, 1.0F}), "decal: not on Link himself");
+  Require(!PlayerShadowDecalLookup(*decal, {-10.0F, -70.0F, 0.0F}), "decal: nothing below the range (past a ledge)");
+  const auto low = PlayerShadowDecalLookup(*decal, {-10.0F, -kPlayerShadowBodyBelow + lift + 2.0F, 0.0F});
+  Require(low && low->Strength < 0.5F, "decal: it fades at the range's ends");
 }
 
 void TestProjection() {
@@ -404,6 +449,7 @@ int main() {
   TestOpacity();
   TestLightDirection();
   TestLightEasing();
+  TestDecal();
   TestProjection();
   TestPatch();
   TestRegion();

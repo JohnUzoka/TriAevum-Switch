@@ -58,9 +58,14 @@ struct PlayerShadowFrame {
 //   floor region (PlayerShadowFloorRegion); one triangle over that rectangle
 //   darkens where it is set and zeroes it;
 // - Texture: the meshes go flat into a silhouette texture of the floor region,
-//   which one quad on the floor samples (the mod's way: soft edges).
-enum class PlayerShadowMethod : uint8_t { TwoPass, OnePass, Cover, Texture };
-inline constexpr size_t kPlayerShadowMethodCount = 4U;
+//   which one quad on the floor samples (the mod's way: soft edges);
+// - Decal: the same silhouette, cast on whatever the scene drew around Link
+//   (user, logs42: the others lie on one plane, so half of the shadow went
+//   under rising ground and none bent over steps or walls): a rectangle over
+//   the region reads the scene's depth, takes each pixel's world point along
+//   the light into the silhouette, and stops at the region's height range.
+enum class PlayerShadowMethod : uint8_t { TwoPass, OnePass, Cover, Texture, Decal };
+inline constexpr size_t kPlayerShadowMethodCount = 5U;
 // logs37 (Switch Lite, 307 MHz, the Temple of Time facing Link): per frame
 // two passes 0.96-1.02 ms, texture 0.63-0.89, cover 0.52-0.58, one pass
 // 0.50-0.51. Cover looks like two passes at about half the cost.
@@ -73,6 +78,7 @@ inline constexpr PlayerShadowMethod kPlayerShadowDefaultMethod = PlayerShadowMet
     case PlayerShadowMethod::OnePass: return "one_pass";
     case PlayerShadowMethod::Cover: return "cover";
     case PlayerShadowMethod::Texture: return "texture";
+    case PlayerShadowMethod::Decal: return "decal";
     }
     return "two_pass";
 }
@@ -174,6 +180,47 @@ using Mat4 = std::array<float, 16>; // row-major, column vectors
         std::abs(view[14]) > 1.0e-4F || std::abs(view[15] - 1.0F) > 1.0e-4F)
         return std::nullopt;
     return view;
+}
+// A general 4x4 inverse (row-major, column vectors), or nothing when singular.
+[[nodiscard]] inline std::optional<Mat4> Inverse(const Mat4& m) noexcept {
+    Mat4 inv{};
+    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] +
+             m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] -
+             m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] +
+             m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] -
+              m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] -
+             m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] +
+             m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] -
+             m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] +
+              m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] +
+             m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] -
+             m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] +
+              m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] -
+              m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] -
+             m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] +
+             m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] -
+              m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] +
+              m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+    const float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (!std::isfinite(det) || std::abs(det) < 1.0e-20F) return std::nullopt;
+    for (float& value : inv) value /= det;
+    if (!Finite(inv)) return std::nullopt;
+    return inv;
 }
 } // namespace PlayerShadowDetail
 
@@ -477,6 +524,131 @@ struct PlayerShadowRegion {
 }
 
 // The mod's opacity (0x005FDC4C..0x005FDCD4) for the actor's shadow alpha at
+// Method Decal (player_shadow_decal_fsh.glsl does the same per pixel). The
+// scene's depth d at a pixel of NDC (x, y) is -z/w of PICA's clip
+// (TranslatePicaShaderToOpenGl43's z' = -2z - w and the -1..1 depth mode), so
+// the world point is ClipToWorld * (x, y, -d, 1) divided by its w.
+inline constexpr float kPlayerShadowDecalLinkRadius = 18.0F; // his body, not a receiver
+inline constexpr float kPlayerShadowDecalLinkTall = 80.0F;
+inline constexpr float kPlayerShadowDecalLinkMiddle = 25.0F;   // above his position
+inline constexpr float kPlayerShadowDecalFade = 10.0F;         // units at the height range's ends
+
+struct PlayerShadowDecal {
+    std::array<float, 16> ClipToWorld{}; // row-major
+    std::array<float, 3> Origin{};
+    std::array<float, 3> Normal{};
+    std::array<float, 3> TowardLight{};
+    float Rise = 1.0F; // TowardLight . Normal
+    std::array<float, 3> Along{};
+    std::array<float, 3> Across{};
+    std::array<float, 2> AlongRange{};
+    std::array<float, 2> AcrossRange{};
+    float Lowest = -kPlayerShadowBodyBelow; // receivers' height above the plane
+    float Highest = kPlayerShadowBodyAbove;
+    std::array<float, 3> Link{};   // his position
+    std::array<float, 3> Middle{}; // the side of him the light comes from is not his shadow
+};
+
+[[nodiscard]] inline std::optional<PlayerShadowDecal> PlayerShadowDecalOf(
+    const PlayerShadowFrame& frame, const PlayerShadowRegion& region, const std::array<float, 3>& towardLight,
+    const std::array<float, 16>& worldToClip) noexcept {
+    using namespace PlayerShadowDetail;
+    const auto clipToWorld = Inverse(worldToClip);
+    if (!clipToWorld) return std::nullopt;
+    PlayerShadowDecal decal;
+    decal.ClipToWorld = *clipToWorld;
+    decal.Origin = region.Origin;
+    decal.Normal = Normalized(frame.FloorNormal).value_or(Vec3{0.0F, 1.0F, 0.0F});
+    decal.TowardLight = towardLight;
+    decal.Rise = Dot(towardLight, decal.Normal);
+    if (!(decal.Rise > 1.0e-3F)) return std::nullopt;
+    decal.Along = region.Along;
+    decal.Across = region.Across;
+    decal.AlongRange = region.AlongRange;
+    decal.AcrossRange = region.AcrossRange;
+    decal.Link = {frame.FloorPoint[0], frame.FloorPoint[1] + frame.Height, frame.FloorPoint[2]};
+    for (size_t axis = 0; axis < 3U; ++axis)
+        decal.Middle[axis] = decal.Link[axis] + decal.Normal[axis] * kPlayerShadowDecalLinkMiddle;
+    return decal;
+}
+
+// The world point the scene shows at NDC (x, y) and depth d, or nothing.
+[[nodiscard]] inline std::optional<std::array<float, 3>> PlayerShadowDecalWorldPoint(const PlayerShadowDecal& decal,
+                                                                                    float x, float y,
+                                                                                    float depth) noexcept {
+    const auto& m = decal.ClipToWorld;
+    const std::array<float, 4> clip{x, y, -depth, 1.0F};
+    std::array<float, 4> world{};
+    for (size_t row = 0; row < 4U; ++row)
+        world[row] = m[row * 4U] * clip[0] + m[row * 4U + 1U] * clip[1] + m[row * 4U + 2U] * clip[2] + m[row * 4U + 3U];
+    if (!(std::abs(world[3]) > 1.0e-6F)) return std::nullopt;
+    return std::array<float, 3>{world[0] / world[3], world[1] / world[3], world[2] / world[3]};
+}
+
+// Where a scene point falls in the silhouette (u along, v across, 0..1 in
+// the region, before the floor quad's row flip) and how strongly (the fade at
+// the height range's ends), or nothing when it takes no shadow.
+struct PlayerShadowDecalHit {
+    std::array<float, 2> Uv{};
+    float Strength = 1.0F;
+};
+[[nodiscard]] inline std::optional<PlayerShadowDecalHit> PlayerShadowDecalLookup(
+    const PlayerShadowDecal& decal, const std::array<float, 3>& point) noexcept {
+    using namespace PlayerShadowDetail;
+    const Vec3 relative{point[0] - decal.Origin[0], point[1] - decal.Origin[1], point[2] - decal.Origin[2]};
+    const float height = Dot(relative, decal.Normal);
+    if (!(height >= decal.Lowest && height <= decal.Highest)) return std::nullopt;
+    const Vec3 fromMiddle{point[0] - decal.Middle[0], point[1] - decal.Middle[1], point[2] - decal.Middle[2]};
+    if (Dot(fromMiddle, decal.TowardLight) > 0.0F) return std::nullopt; // between him and the light
+    const Vec3 fromLink{point[0] - decal.Link[0], point[1] - decal.Link[1], point[2] - decal.Link[2]};
+    const float up = Dot(fromLink, decal.Normal);
+    const Vec3 sideways{fromLink[0] - up * decal.Normal[0], fromLink[1] - up * decal.Normal[1],
+                        fromLink[2] - up * decal.Normal[2]};
+    if (Dot(sideways, sideways) < kPlayerShadowDecalLinkRadius * kPlayerShadowDecalLinkRadius && up > 1.0F &&
+        up < kPlayerShadowDecalLinkTall)
+        return std::nullopt; // Link himself
+    const float along = height / decal.Rise;
+    const Vec3 flat{relative[0] - decal.TowardLight[0] * along, relative[1] - decal.TowardLight[1] * along,
+                    relative[2] - decal.TowardLight[2] * along};
+    PlayerShadowDecalHit hit;
+    hit.Uv = {(Dot(flat, decal.Along) - decal.AlongRange[0]) / (decal.AlongRange[1] - decal.AlongRange[0]),
+              (Dot(flat, decal.Across) - decal.AcrossRange[0]) / (decal.AcrossRange[1] - decal.AcrossRange[0])};
+    if (!(hit.Uv[0] >= 0.0F && hit.Uv[0] <= 1.0F && hit.Uv[1] >= 0.0F && hit.Uv[1] <= 1.0F)) return std::nullopt;
+    hit.Strength = std::clamp(std::min(height - decal.Lowest, decal.Highest - height) / kPlayerShadowDecalFade, 0.0F,
+                              1.0F);
+    return hit;
+}
+
+// The target pixels the decal's box (the region from Lowest to Highest above
+// the plane) spans, as PlayerShadowScreenRect; nothing when a corner is not in
+// front of the camera.
+[[nodiscard]] inline std::optional<std::array<int32_t, 4>> PlayerShadowDecalScreenRect(
+    const std::array<float, 16>& worldToClip, const PlayerShadowDecal& decal, const PlayerShadowRegion& region,
+    const std::array<float, 4>& viewport, bool minusOneFirst) noexcept {
+    std::array<float, 2> columns{std::numeric_limits<float>::max(), std::numeric_limits<float>::lowest()};
+    std::array<float, 2> rows = columns;
+    for (const auto& corner : region.Corners()) {
+        for (const float height : {decal.Lowest, decal.Highest}) {
+            const std::array<float, 3> point{corner[0] + decal.Normal[0] * height, corner[1] + decal.Normal[1] * height,
+                                             corner[2] + decal.Normal[2] * height};
+            const auto clip = PlayerShadowDetail::Transform(worldToClip, point);
+            if (!(clip[3] > 1.0e-3F)) return std::nullopt;
+            const float column = viewport[0] + (clip[0] / clip[3] + 1.0F) * 0.5F * viewport[2];
+            const float y = clip[1] / clip[3];
+            const float row = viewport[1] + (minusOneFirst ? y + 1.0F : 1.0F - y) * 0.5F * viewport[3];
+            columns = {std::min(columns[0], column), std::max(columns[1], column)};
+            rows = {std::min(rows[0], row), std::max(rows[1], row)};
+        }
+    }
+    if (!PlayerShadowDetail::Finite(columns) || !PlayerShadowDetail::Finite(rows)) return std::nullopt;
+    const auto bound = [](float value) { return std::clamp(value, -1.0e6F, 1.0e6F); };
+    const auto x0 = static_cast<int32_t>(std::floor(bound(columns[0]))) - 1;
+    const auto y0 = static_cast<int32_t>(std::floor(bound(rows[0]))) - 1;
+    const auto x1 = static_cast<int32_t>(std::ceil(bound(columns[1]))) + 1;
+    const auto y1 = static_cast<int32_t>(std::ceil(bound(rows[1]))) + 1;
+    return std::array<int32_t, 4>{x0, y0, x1 - x0, y1 - y0};
+}
+
 // `height`: 180 at its default darkness, the game's round-shadow fade over
 // 150 of 350 units that the rise undoes, a near fade over 60 units that the
 // rise also takes over, times 0.8; truncated as the payload truncates.
