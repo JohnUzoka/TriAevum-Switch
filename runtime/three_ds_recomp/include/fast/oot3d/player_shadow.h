@@ -102,10 +102,9 @@ inline constexpr float kPlayerShadowRiseStart = 40.0F;
 inline constexpr float kPlayerShadowRiseLength = 100.0F;
 inline constexpr float kPlayerShadowMinimumElevation = 0.3F;
 // The flattened body sits this far above the floor plane under Link,
-// against depth fighting and the terrain's small bumps around him, which
-// hid parts of it at 0.75 (user, logs41: "glitchy when it goes under
-// meshes") [INFERENCE: not seen frame by frame].
-inline constexpr float kPlayerShadowLift = 3.0F;
+// against depth fighting. 3 (0.2.4-test.3, against terrain bumps) made it
+// float and start away from his feet along the light (user, logs42).
+inline constexpr float kPlayerShadowLift = 0.75F;
 // The mod's darkness at its default 100% (0x005F9E58), and its final factor.
 inline constexpr float kPlayerShadowBaseAlpha = 180.0F;
 inline constexpr float kPlayerShadowAlphaScale = 0.8F;

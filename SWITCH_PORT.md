@@ -924,8 +924,11 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
     load, takes it at once); opposite directions pass through the vertical. Link's rise and floor are
     applied after (`PlayerShadowSceneLightOf`, then `PlayerShadowLightDirection(scene, ...)`).
   - *Under meshes:* the flattened body lay 0.75 units above the plane of the floor polygon under
-    Link, so terrain bumping above that plane nearby hid parts of it. `kPlayerShadowLift` is now 3
-    units [INFERENCE: what "under meshes" means was not seen; a clip would tell].
+    Link, so terrain bumping above that plane nearby could hide parts of it. 0.2.4-test.3 raised
+    `kPlayerShadowLift` to 3 units; on the console (logs42, 11/13) the shadow then "sits above the
+    ground" and "doesn't quite line up" (his feet, at the floor, land 3 units toward the light at
+    45 degrees), so it is 0.75 again. A depth bias would keep it on the ground, but its sign depends
+    on the game's depth direction, not settled from the code.
   - Test: `oot3d_player_shadow_tests` (TestLightEasing; TestRegion's margin follows the lift).
 
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
