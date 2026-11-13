@@ -6,9 +6,9 @@
 // darkens by it, under the rules of PlayerShadowDecalLookup (player_shadow.h):
 // only within the region's height range, not between Link and the light, not
 // Link himself, unless it is the floor drawn a little above the ground under
-// him. Four bilinear taps soften the edge, more away from his feet. Where the
-// pixel's ray crosses the scene's translucent floor (drawn without depth, the
-// Temple of Time's marble) before its point, the floor is the receiver
+// him. One bilinear tap of the silhouette gives the edge. Where the pixel's
+// ray crosses the scene's translucent floor (drawn without depth, the Temple
+// of Time's marble) before its point, the floor is the receiver
 // (PlayerShadowDecalReceiverAt).
 layout(std140, binding = 0) uniform PlayerShadowDecal {
     mat4 clip_to_world;  // world = clip_to_world * (ndc x, ndc y, -depth, 1), then / w
@@ -21,7 +21,7 @@ layout(std140, binding = 0) uniform PlayerShadowDecal {
     vec4 extent;         // x: 1 / along length, y: 1 / across length, z: lowest height, w: highest
     vec4 link;           // xyz: Link's position; w: his radius
     vec4 middle;         // xyz: his middle; w: his height
-    vec4 shade;          // x: opacity, y: one silhouette texel, z: the fade's length, w: the raised floor's height
+    vec4 shade;          // x: opacity, y: unused, z: the fade's length, w: the raised floor's height
     vec4 eye;            // xyz: the camera; w: the translucent floor's height (none: lowest float)
     vec4 floor_box;      // the translucent floor's lowest x, highest x, lowest z, highest z
 };
@@ -90,13 +90,10 @@ void main() {
     // The silhouette's rows follow the scene's NDC-to-row rule, as the floor quad's texcoords.
     if (origin.w <= 0.5) uv.y = 1.0 - uv.y;
 
-    // Crisp where it meets his feet, softer farther along (as a real shadow):
-    // the same four taps, spread from 0.75 to 2.25 texels over 60 units of the
-    // plane; wider, four taps show a doubled edge.
-    float d = shade.y * mix(0.75, 2.25, clamp(length(flat_point) / 60.0, 0.0, 1.0));
-    float cover = texture(silhouette, uv + vec2(-d, -d)).r + texture(silhouette, uv + vec2(d, -d)).r +
-                  texture(silhouette, uv + vec2(-d, d)).r + texture(silhouette, uv + vec2(d, d)).r;
+    // One bilinear tap (user 11/13: the four spread taps showed "2 shaded
+    // layers" at the head end; one tap costs less).
+    float cover = texture(silhouette, uv).r;
     if (cover <= 0.0) discard;
     float fade = clamp(min(height - extent.z, extent.w - height) / shade.z, 0.0, 1.0);
-    shadow_out_color = vec4(0.0, 0.0, 0.0, shade.x * cover * 0.25 * fade);
+    shadow_out_color = vec4(0.0, 0.0, 0.0, shade.x * cover * fade);
 }

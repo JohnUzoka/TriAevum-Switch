@@ -977,6 +977,9 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   the same four bilinear taps, spread from 0.75 silhouette texels where the shadow meets his feet to 2.25
   texels 60 units along the plane and beyond (the shader's `length(flat_point)`), so it is crisp at the
   feet and softer farther, at no extra texture reads (the DKSH stays 2048 B). Wider, four taps double the edge.
+  **Removed in 0.2.5-test.5** (user: "the edges of the shadows look a bit weird at the top like there's 2
+  shaded layers, could we remove the effects and make the shadow cheaper", "I don't think they add anything"):
+  one bilinear tap of the silhouette, a quarter of the texture reads (decal DKSH 3840 -> 3584 B).
 - **One method:** Two passes, One pass, Mark then cover and Texture are gone with their menu, their
   stencil bookkeeping and the floor-quad shaders; `config/simple_shadow_method` is not read (a file left
   by 0.2.3 is ignored) and the gameplay log line has no `shadow_method=`. The dkperf key stays

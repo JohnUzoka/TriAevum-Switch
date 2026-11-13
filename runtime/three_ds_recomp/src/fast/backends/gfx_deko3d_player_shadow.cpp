@@ -47,7 +47,7 @@ struct PlayerShadowDecalUniforms {
     float Extent[4];       // 1 / along length, 1 / across length, lowest, highest
     float Link[4];         // w: his radius
     float Middle[4];       // w: his height
-    float Shade[4];        // opacity, one texel, the fade's length, the raised floor's height
+    float Shade[4];        // opacity, unused, the fade's length, the raised floor's height
     float Eye[4];          // the camera; w: the translucent floor's height (none: lowest float)
     float FloorBox[4];     // the translucent floor's lowest x, highest x, lowest z, highest z
 };
@@ -338,7 +338,6 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     put(block.Link, decal->Link, Oot3d::kPlayerShadowDecalLinkRadius);
     put(block.Middle, decal->Middle, Oot3d::kPlayerShadowDecalLinkTall);
     block.Shade[0] = opacity;
-    block.Shade[1] = 1.0F / static_cast<float>(kPlayerShadowSilhouetteSize);
     block.Shade[2] = Oot3d::kPlayerShadowDecalFade;
     block.Shade[3] = Oot3d::kPlayerShadowDecalFloorRelief;
     // The scene's translucent floor (the Temple of Time's marble); none: no
