@@ -889,6 +889,13 @@ private:
     uint64_t WithoutCamera = 0;
     uint64_t CameraMeasured = 0;
     uint64_t Discontinuities = 0;
+    // Effect quad batches (Oot3dPicaVisualQuadBatchStats), window totals.
+    uint64_t QuadBatches = 0;
+    uint64_t QuadPaired = 0;
+    uint64_t QuadCountChanged = 0;
+    uint64_t QuadRematched = 0;
+    uint64_t QuadNew = 0;
+    uint64_t QuadDropped = 0;
   };
   VisualUnmatchedTotals visualUnmatchedTotals;
   struct InterpolationPerfCounters {

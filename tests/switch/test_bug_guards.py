@@ -2938,6 +2938,31 @@ GUARDS = [
           "tools/oot3d/native_game_runtime/oot3d_simple_shadow.h",
           r'auto frame = DecideSimpleShadow\(\*actor, cutscenes\);\s+(//[^\n]*\n\s+)*if \(frame\) frame->Scene = ReadNativeArea\(memory\)\.Scene;',
           "oot3d_simple_shadow_tests (TestScene)"),
+    # --- 11/13 (0.2.5-test.4, logs48): water ripples blinking on the in-between frames ---
+    Guard("water ripple rings blinked at 60 FPS (0.2.5-test.4, logs48, clips 2026111314590300/2026111315004400): "
+          "the game rebuilds its effect quads (RendererQuad 0x00332A14/0x003FC2F8) on the CPU every frame, sorted "
+          "by depth, two per ripple (one turned half a turn), and the in-between frame blended vertex k with "
+          "vertex k or, when an effect started or ended, gave the batch no partner; quad batches now pair across "
+          "quad counts and their quads by shape and facing",
+          "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
+          r'if \(!QuadsFaceAlike\(before\[p\], after\[c\]\)\) continue;.*?'
+          r'if \(squared > radius \* radius\) sources\[c\] = -1;.*?'
+          r'HaveMatchingQuadBatchLayout\(previous\.Draws\[previousIndex\], current\.Draws\[currentIndex\]\).*?'
+          r'HashVisualDrawIdentity\(current\.Draws\[i\], false\).*?'
+          r'PairMatchedQuadBatch\(previousDraw, currentDraw, currentIndex, currentQuads, delta, \*quadPairing\);.*?'
+          r'InterpolateQuadBatchVertices\(previousDraw, currentDraw, alpha, quadSources, quads,',
+          "oot3d_native_pica_visual_quad_batch_tests"),
+    Guard("0.2.5-test.4 ripples: only quad lists up to 256 quads are paired by shape, and a batch whose quads kept "
+          "their slots keeps the old slot-wise blend (every other draw is sampled as before)",
+          "tools/oot3d/native_game_runtime/oot3d_native_pica_visual_frame.cpp",
+          r'draw\.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads\).*?if \(corners != 0xFU\) return 0U;.*?'
+          r'if \(result == VisualQuadPairing::Identity \|\| \(result == VisualQuadPairing::Unreadable && !countChanged\)\) \{\s*'
+          r'pairing\.Sources\.resize\(first\);',
+          "oot3d_native_pica_visual_quad_batch_tests (TestUnchangedDraws, TestCap)"),
+    Guard("0.2.5-test.4 ripples: perf.txt interp: block counts the effect quad batches of the in-between frames "
+          "(quad_batches, quad_paired, quad_count_changed, quad_rematched, quad_new, quad_dropped)",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
+          r'" quad_batches=".*?" quad_dropped=".*?totals\.QuadDropped \+= quads\.Dropped;'),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

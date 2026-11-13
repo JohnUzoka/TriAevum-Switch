@@ -67,6 +67,7 @@ UNIT_TESTS=(
     oot3d_native_pica_plan_build_tests
     oot3d_native_pica_visual_cull_tests
     oot3d_native_pica_visual_frame_equivalence_tests
+    oot3d_native_pica_visual_quad_batch_tests
     oot3d_native_render_command_stream_tests
     oot3d_native_render_shutdown_tests
     oot3d_pica_etc1_transcode_tests

@@ -1052,6 +1052,37 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   marble beside the carpet and on the steps toward it; the courtyard outside; `shadow_decal_ms` against logs48
   (0.50-0.67 ms median in tokinoma).
 
+### Water ripples blinking at 60 FPS: the game's effect quads paired by shape (user, logs48, 0.2.5-test.4, 11/13)
+- **Seen:** "the water circle textures blinking" (clips 2026111314590300, Zora's Fountain, and
+  2026111315004400, Zora's River). In clip A at 10.667-10.80 s the newest ripple at Link's feet is present,
+  present, gone, present, gone while the older one stays, at a steady capture rhythm (floe edge 20-23 px a frame).
+  After the duplicated frame at 16.70 s (the capture now takes the other kind of 60 FPS frame) the rings are
+  steady. Game frames are the game's own (`exact_step=1`): the blink is in the in-between frames.
+- **Cause:** ripples, splashes, dust, sparks, shield particles, rain and snow and the point-light glows are one
+  quad batch per effect type that the game rebuilds on the CPU every frame (RendererQuad, EUR 0x00332A14 adds an
+  instance, 0x003FC2F8 builds the batch). Each instance is transformed, the instances are sorted by depth, and the
+  batch gets 4 corners and 6 indices per quad. A ripple is two instances at one centre, one turned half a turn
+  (for the view from under the water), 1 unit above the water. The in-between frame blended vertex k with
+  vertex k, so a re-sorted ripple landed halfway to another one or folded onto its turned copy (a line). A batch
+  whose quad count changed (any ripple starting or ending) had no partner: it was drawn as the new frame drew it
+  while the water was half a step behind. Not new in test.4, not the shadow; 30 FPS has no in-between frames.
+- **Fix** (`oot3d_native_pica_visual_frame.cpp`): a quad list (each group of 6 indices over vertices 4q..4q+3,
+  up to `kOot3dPicaVisualQuadBatchMaximumQuads` = 256 quads) is paired with its previous batch also across quad
+  counts. With a native key, the layout match ignores `VertexCount`; without one, a last stage pairs one batch
+  per strict identity without the count. Each current quad takes the nearest free previous quad, corner by
+  corner, facing the same way, nearest pairs first. A pair whose centre moved, beyond the batch's median motion,
+  by more than the larger quad's radius is not a pair. Matched quads blend corner by corner, new quads are drawn
+  as they are, expired ones are left out. When every quad is paired with its own slot, the old slot-wise blend
+  stands. Every other draw, and the game frames, are unchanged.
+- **perf.txt** (`interp:` block, window totals): `quad_batches quad_paired quad_count_changed quad_rematched
+  quad_new quad_dropped`.
+- **Test:** `oot3d_native_pica_visual_quad_batch_tests` (re-sorted, count changed, turned copy at the same centre,
+  unchanged draws bit for bit, the cap). Guards "water ripple rings blinked at 60 FPS ...".
+- **Console check:** wade and swim at Zora's Fountain and Zora's River at 60 FPS; the rings should no longer
+  vanish or tint on alternate frames. In perf.txt there, `quad_batches` and `quad_paired` should be non-zero and
+  `quad_count_changed` / `quad_rematched` should rise while wading. If `quad_batches` is non-zero but
+  `quad_paired` stays 0, the batches did not pair (neither key matched) and the blink will remain.
+
 ### Ocarina song menu over the notes being played (user, 11/13)
 - **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we
   should have one or the other". In the clip the menu's white preview notes and the notes the

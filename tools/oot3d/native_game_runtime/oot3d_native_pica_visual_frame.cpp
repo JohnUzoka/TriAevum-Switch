@@ -171,6 +171,64 @@ bool InterpolatableVertexValuesDiffer(
     return false;
 }
 
+// One component of a vertex attribute from `left` to `right` at alpha into
+// `destination`; true when the two differ. Unsigned bytes (colours,
+// selectors) are left as they are.
+bool InterpolateVertexComponent(Oot3dPicaVertexFormat format, const uint8_t* left, const uint8_t* right,
+                                uint8_t* destination, float alpha) {
+    switch (format) {
+    case Oot3dPicaVertexFormat::SignedByte: {
+      const int8_t leftValue = static_cast<int8_t>(*left);
+      const int8_t rightValue = static_cast<int8_t>(*right);
+      const auto value =
+          std::clamp<long>(std::lround(InterpolateFinite(
+                               static_cast<float>(leftValue),
+                               static_cast<float>(rightValue), alpha)),
+                           std::numeric_limits<int8_t>::min(),
+                           std::numeric_limits<int8_t>::max());
+      *destination = static_cast<uint8_t>(static_cast<int8_t>(value));
+      return leftValue != rightValue;
+    }
+    case Oot3dPicaVertexFormat::SignedShort: {
+      int16_t leftValue = 0;
+      int16_t rightValue = 0;
+      std::memcpy(&leftValue, left, sizeof(leftValue));
+      std::memcpy(&rightValue, right, sizeof(rightValue));
+      const auto value =
+          std::clamp<long>(std::lround(InterpolateFinite(
+                               static_cast<float>(leftValue),
+                               static_cast<float>(rightValue), alpha)),
+                           std::numeric_limits<int16_t>::min(),
+                           std::numeric_limits<int16_t>::max());
+      const int16_t encoded = static_cast<int16_t>(value);
+      std::memcpy(destination, &encoded, sizeof(encoded));
+      return leftValue != rightValue;
+    }
+    case Oot3dPicaVertexFormat::Float: {
+      float leftValue = 0.0F;
+      float rightValue = 0.0F;
+      std::memcpy(&leftValue, left, sizeof(leftValue));
+      std::memcpy(&rightValue, right, sizeof(rightValue));
+      const float encoded = InterpolateFinite(leftValue, rightValue, alpha);
+      std::memcpy(destination, &encoded, sizeof(encoded));
+      return leftValue != rightValue;
+    }
+    case Oot3dPicaVertexFormat::UnsignedByte:
+      break;
+    }
+    return false;
+}
+
+// The attributes a sample blends: not unsigned bytes, not the inputs the
+// program marks as discrete (texture coordinates, bone indices).
+bool IsInterpolatedVertexAttribute(const Oot3dPicaVulkanDrawPlan& current,
+                                   const Oot3dPicaVulkanVertexAttribute& attribute) {
+    return attribute.Format != Oot3dPicaVertexFormat::UnsignedByte &&
+           (!current.VertexShader.TemporalProgram ||
+            Fast::Renderer3ds::IsPicaVertexInputContinuousForPresentation(
+                current.VertexShader.TemporalProgram->Hooks, attribute.Location));
+}
+
 bool InterpolateVertexValues(
     const Oot3dPicaVulkanDrawPlan& previous,
     const Oot3dPicaVulkanDrawPlan& current, float alpha,
@@ -178,10 +236,7 @@ bool InterpolateVertexValues(
                              std::vector<Oot3dPicaVulkanVertexBinding>& outputBindings) {
     bool interpolated = false;
     for (const auto& attribute : current.VertexAttributes) {
-        if (attribute.Format == Oot3dPicaVertexFormat::UnsignedByte ||
-            (current.VertexShader.TemporalProgram &&
-             !Fast::Renderer3ds::IsPicaVertexInputContinuousForPresentation(
-                 current.VertexShader.TemporalProgram->Hooks, attribute.Location))) {
+        if (!IsInterpolatedVertexAttribute(current, attribute)) {
             continue;
         }
         const auto* left = FindVertexBinding(previous, attribute.Binding);
@@ -212,62 +267,318 @@ bool InterpolateVertexValues(
           for (size_t component = 0; component < attribute.ComponentCount;
                ++component) {
             const size_t offset = recordOffset + component * componentBytes;
-            switch (attribute.Format) {
-            case Oot3dPicaVertexFormat::SignedByte: {
-              const int8_t leftValue = static_cast<int8_t>(leftBytes[offset]);
-              const int8_t rightValue = static_cast<int8_t>(rightBytes[offset]);
-              const auto value =
-                  std::clamp<long>(std::lround(InterpolateFinite(
-                                       static_cast<float>(leftValue),
-                                       static_cast<float>(rightValue), alpha)),
-                                   std::numeric_limits<int8_t>::min(),
-                                   std::numeric_limits<int8_t>::max());
-              destinationBytes[offset] =
-                  static_cast<uint8_t>(static_cast<int8_t>(value));
-              interpolated |= leftValue != rightValue;
-              break;
-            }
-            case Oot3dPicaVertexFormat::SignedShort: {
-              int16_t leftValue = 0;
-              int16_t rightValue = 0;
-              std::memcpy(&leftValue, leftBytes.data() + offset,
-                          sizeof(leftValue));
-              std::memcpy(&rightValue, rightBytes.data() + offset,
-                          sizeof(rightValue));
-              const auto value =
-                  std::clamp<long>(std::lround(InterpolateFinite(
-                                       static_cast<float>(leftValue),
-                                       static_cast<float>(rightValue), alpha)),
-                                   std::numeric_limits<int16_t>::min(),
-                                   std::numeric_limits<int16_t>::max());
-              const int16_t encoded = static_cast<int16_t>(value);
-              std::memcpy(destinationBytes.data() + offset, &encoded,
-                          sizeof(encoded));
-              interpolated |= leftValue != rightValue;
-              break;
-            }
-            case Oot3dPicaVertexFormat::Float: {
-              float leftValue = 0.0F;
-              float rightValue = 0.0F;
-              std::memcpy(&leftValue, leftBytes.data() + offset,
-                          sizeof(leftValue));
-              std::memcpy(&rightValue, rightBytes.data() + offset,
-                          sizeof(rightValue));
-              const float encoded =
-                  InterpolateFinite(leftValue, rightValue, alpha);
-              std::memcpy(destinationBytes.data() + offset, &encoded,
-                          sizeof(encoded));
-              interpolated |= leftValue != rightValue;
-              break;
-            }
-            case Oot3dPicaVertexFormat::UnsignedByte:
-              break;
-            }
+            interpolated |= InterpolateVertexComponent(
+                attribute.Format, leftBytes.data() + offset, rightBytes.data() + offset,
+                destinationBytes.data() + offset, alpha);
           }
         }
     }
     return interpolated;
 }
+
+// --- The game's effect quad batches (RendererQuad) ------------------------
+//
+// EffectSs ripples, splashes, dust, sparks, shield particles, rain and snow
+// and the point-light glows are instances of one batch per effect type
+// (EUR 0x00332A14 adds an instance, 0x003FC2F8 builds the batch): every game
+// frame the CPU transforms each instance, sorts the instances by depth and
+// writes four corners per instance, six indices per quad. Quad k of one frame
+// is often not quad k of the next (re-sorted, spawned, expired), and the
+// count changes whenever an effect starts or ends. Blending vertex k with
+// vertex k put a ripple halfway to another one or folded it onto its turned
+// copy, and a batch whose count changed had no partner at all: the rings
+// blinked on the in-between frames (0.2.5-test.4, logs48). Such a batch is
+// paired with its previous one even when the count changed, and its quads
+// by shape.
+
+// The quads of an indexed triangle list whose every group of six indices
+// uses exactly the four vertices 4q..4q+3 (after BaseVertex), or 0: not such
+// a draw, or above kOot3dPicaVisualQuadBatchMaximumQuads.
+uint32_t QuadBatchQuads(const Oot3dPicaVulkanDrawPlan& draw) {
+    if (!draw.Indexed || draw.State.Topology != Oot3dPicaPrimitiveTopology::TriangleList ||
+        draw.VertexCount == 0U || draw.VertexCount % 6U != 0U ||
+        draw.VertexCount / 6U > kOot3dPicaVisualQuadBatchMaximumQuads) {
+        return 0U;
+    }
+    const auto bytes = draw.ResolvedIndexBytes();
+    const size_t indexBytes = draw.IndicesAre16Bit ? 2U : 1U;
+    if (bytes.size() < size_t{draw.VertexCount} * indexBytes) {
+        return 0U;
+    }
+    const uint32_t quads = draw.VertexCount / 6U;
+    for (uint32_t quad = 0; quad < quads; ++quad) {
+        uint32_t corners = 0;
+        for (uint32_t item = 0; item < 6U; ++item) {
+            const size_t at = (size_t{quad} * 6U + item) * indexBytes;
+            uint32_t index = bytes[at];
+            if (draw.IndicesAre16Bit) index |= uint32_t{bytes[at + 1U]} << 8U;
+            const int64_t corner = int64_t{index} + draw.BaseVertex - int64_t{quad} * 4;
+            if (corner < 0 || corner > 3) return 0U;
+            corners |= 1U << corner;
+        }
+        if (corners != 0xFU) return 0U;
+    }
+    return quads;
+}
+
+// Where a quad batch's corners are: the transform hook's position input when
+// the program has one, else the lowest float input of three or more
+// components.
+const Oot3dPicaVulkanVertexAttribute* QuadBatchPosition(const Oot3dPicaVulkanDrawPlan& draw) {
+    const auto& program = draw.VertexShader.TemporalProgram;
+    const uint8_t hooked = program ? program->Hooks.Transform.PositionInputRegister
+                                   : Fast::Renderer3ds::PicaVertexTransformLayout::Unavailable;
+    const Oot3dPicaVulkanVertexAttribute* found = nullptr;
+    for (const auto& attribute : draw.VertexAttributes) {
+        const auto* binding = FindVertexBinding(draw, attribute.Binding);
+        if (attribute.Format != Oot3dPicaVertexFormat::Float || attribute.ComponentCount < 3U ||
+            binding == nullptr || binding->InputRate != Oot3dPicaVertexInputRate::PerVertex ||
+            size_t{attribute.ByteOffset} + 12U > binding->ByteStride) {
+            continue;
+        }
+        if (hooked < 16U) {
+            if (attribute.Location == hooked) return &attribute;
+            continue;
+        }
+        if (found == nullptr || attribute.Location < found->Location) found = &attribute;
+    }
+    return found;
+}
+
+struct VisualQuad {
+    std::array<std::array<float, 3>, 4> Corners{};
+    std::array<float, 3> Center{};
+    std::array<float, 3> Normal{};  // of the triangle of corners 0, 1, 2
+    float Radius = 0.0F;            // the farthest corner from the centre
+};
+
+// The quads' corners, or false (missing or non-finite positions).
+bool ReadQuadBatch(const Oot3dPicaVulkanDrawPlan& draw, const Oot3dPicaVulkanVertexAttribute& position,
+                   uint32_t quads, std::vector<VisualQuad>& out) {
+    const auto* binding = FindVertexBinding(draw, position.Binding);
+    if (binding == nullptr || quads == 0U) return false;
+    const auto bytes = binding->ResolvedBytes();
+    const size_t stride = binding->ByteStride;
+    if ((size_t{quads} * 4U - 1U) * stride + position.ByteOffset + 12U > bytes.size()) return false;
+    out.resize(quads);
+    for (uint32_t quad = 0; quad < quads; ++quad) {
+        auto& item = out[quad];
+        item.Center = {};
+        for (size_t corner = 0; corner < 4U; ++corner) {
+            std::memcpy(item.Corners[corner].data(),
+                        bytes.data() + (size_t{quad} * 4U + corner) * stride + position.ByteOffset, 12U);
+            for (size_t axis = 0; axis < 3U; ++axis) {
+                if (!std::isfinite(item.Corners[corner][axis])) return false;
+                item.Center[axis] += item.Corners[corner][axis] * 0.25F;
+            }
+        }
+        std::array<float, 3> a{}, b{};
+        for (size_t axis = 0; axis < 3U; ++axis) {
+            a[axis] = item.Corners[1][axis] - item.Corners[0][axis];
+            b[axis] = item.Corners[2][axis] - item.Corners[0][axis];
+        }
+        item.Normal = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+        item.Radius = 0.0F;
+        for (const auto& corner : item.Corners) {
+            float squared = 0.0F;
+            for (size_t axis = 0; axis < 3U; ++axis)
+                squared += (corner[axis] - item.Center[axis]) * (corner[axis] - item.Center[axis]);
+            item.Radius = std::max(item.Radius, std::sqrt(squared));
+        }
+    }
+    return true;
+}
+
+// Corner by corner squared distance.
+float QuadDistance(const VisualQuad& a, const VisualQuad& b) {
+    float sum = 0.0F;
+    for (size_t corner = 0; corner < 4U; ++corner)
+        for (size_t axis = 0; axis < 3U; ++axis) {
+            const float d = a.Corners[corner][axis] - b.Corners[corner][axis];
+            sum += d * d;
+        }
+    return sum;
+}
+
+// The same side faces the camera in both: a quad and its copy turned half a
+// turn (each ripple has one, for the view from under the water) never pair.
+bool QuadsFaceAlike(const VisualQuad& a, const VisualQuad& b) {
+    const auto dot = [](const std::array<float, 3>& x, const std::array<float, 3>& y) {
+        return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    };
+    return dot(a.Normal, b.Normal) >= -1.0e-3F * std::sqrt(dot(a.Normal, a.Normal) * dot(b.Normal, b.Normal));
+}
+
+struct VisualQuadScratch {
+    std::vector<VisualQuad> Previous, Current;
+    std::vector<int32_t> Best;
+    std::vector<float> BestDistance;
+    std::vector<uint32_t> Order;
+    std::vector<uint8_t> Taken;
+    std::array<std::vector<float>, 3> Shifts;
+};
+
+enum class VisualQuadPairing : uint8_t {
+    Identity,    // quad k pairs with quad k: the slot-wise blend is right
+    Remapped,    // `sources` holds the previous quad of each current quad or -1
+    Unreadable,  // no positions to compare
+};
+
+// Each current quad takes the nearest previous quad (corner by corner) that
+// faces the same way and is still free, nearest pairs first. When that is
+// quad k for quad k everywhere, the slot-wise blend stands (Identity).
+// Otherwise a pair whose centre moved, beyond the batch's median motion (the
+// camera's share), by more than the larger quad's radius is two different
+// effects: the current one is drawn as it is, the previous one left out.
+VisualQuadPairing PairVisualQuadBatch(const Oot3dPicaVulkanDrawPlan& previous, const Oot3dPicaVulkanDrawPlan& current,
+                                      uint32_t previousQuads, uint32_t currentQuads, int32_t* sources,
+                                      VisualQuadScratch& scratch) {
+    const auto* previousPosition = QuadBatchPosition(previous);
+    const auto* currentPosition = QuadBatchPosition(current);
+    if (previousPosition == nullptr || currentPosition == nullptr ||
+        previousPosition->Location != currentPosition->Location ||
+        !ReadQuadBatch(previous, *previousPosition, previousQuads, scratch.Previous) ||
+        !ReadQuadBatch(current, *currentPosition, currentQuads, scratch.Current)) {
+        return VisualQuadPairing::Unreadable;
+    }
+    const auto& before = scratch.Previous;
+    const auto& after = scratch.Current;
+    scratch.Best.assign(currentQuads, -1);
+    scratch.BestDistance.assign(currentQuads, 0.0F);
+    scratch.Order.clear();
+    for (uint32_t c = 0; c < currentQuads; ++c) {
+        for (uint32_t p = 0; p < previousQuads; ++p) {
+            if (!QuadsFaceAlike(before[p], after[c])) continue;
+            const float distance = QuadDistance(before[p], after[c]);
+            if (scratch.Best[c] < 0 || distance < scratch.BestDistance[c]) {
+                scratch.Best[c] = static_cast<int32_t>(p);
+                scratch.BestDistance[c] = distance;
+            }
+        }
+        if (scratch.Best[c] >= 0) scratch.Order.push_back(c);
+    }
+    std::sort(scratch.Order.begin(), scratch.Order.end(), [&](uint32_t a, uint32_t b) {
+        return scratch.BestDistance[a] != scratch.BestDistance[b] ? scratch.BestDistance[a] < scratch.BestDistance[b]
+                                                                  : a < b;
+    });
+    scratch.Taken.assign(previousQuads, 0U);
+    std::fill(sources, sources + currentQuads, -1);
+    for (const uint32_t c : scratch.Order) {
+        int32_t chosen = scratch.Best[c];
+        if (scratch.Taken[static_cast<size_t>(chosen)] != 0U) {
+            chosen = -1;
+            float nearest = 0.0F;
+            for (uint32_t p = 0; p < previousQuads; ++p) {
+                if (scratch.Taken[p] != 0U || !QuadsFaceAlike(before[p], after[c])) continue;
+                const float distance = QuadDistance(before[p], after[c]);
+                if (chosen < 0 || distance < nearest) {
+                    chosen = static_cast<int32_t>(p);
+                    nearest = distance;
+                }
+            }
+            if (chosen < 0) continue;
+        }
+        scratch.Taken[static_cast<size_t>(chosen)] = 1U;
+        sources[c] = chosen;
+    }
+    if (previousQuads == currentQuads) {
+        bool identity = true;
+        for (uint32_t c = 0; c < currentQuads && identity; ++c) identity = sources[c] == static_cast<int32_t>(c);
+        if (identity) return VisualQuadPairing::Identity;
+    }
+    for (auto& shifts : scratch.Shifts) shifts.clear();
+    for (uint32_t c = 0; c < currentQuads; ++c) {
+        if (sources[c] < 0) continue;
+        for (size_t axis = 0; axis < 3U; ++axis)
+            scratch.Shifts[axis].push_back(after[c].Center[axis] - before[static_cast<size_t>(sources[c])].Center[axis]);
+    }
+    std::array<float, 3> median{};
+    for (size_t axis = 0; axis < 3U; ++axis) {
+        auto& shifts = scratch.Shifts[axis];
+        if (shifts.empty()) break;
+        const auto middle = shifts.begin() + static_cast<std::ptrdiff_t>(shifts.size() / 2U);
+        std::nth_element(shifts.begin(), middle, shifts.end());
+        median[axis] = *middle;
+    }
+    for (uint32_t c = 0; c < currentQuads; ++c) {
+        if (sources[c] < 0) continue;
+        const auto& from = before[static_cast<size_t>(sources[c])];
+        float squared = 0.0F;
+        for (size_t axis = 0; axis < 3U; ++axis) {
+            const float residual = after[c].Center[axis] - from.Center[axis] - median[axis];
+            squared += residual * residual;
+        }
+        const float radius = std::max(from.Radius, after[c].Radius);
+        if (squared > radius * radius) sources[c] = -1;
+    }
+    return VisualQuadPairing::Remapped;
+}
+
+// The per-vertex inputs of a paired quad batch: corner k of each current quad
+// from corner k of its previous quad; quads without one keep their values.
+bool InterpolateQuadBatchVertices(const Oot3dPicaVulkanDrawPlan& previous, const Oot3dPicaVulkanDrawPlan& current,
+                                  float alpha, const int32_t* sources, uint32_t quads,
+                                  std::vector<Oot3dPicaVulkanVertexBinding>& outputBindings) {
+    bool interpolated = false;
+    for (const auto& attribute : current.VertexAttributes) {
+        if (!IsInterpolatedVertexAttribute(current, attribute)) continue;
+        const auto* left = FindVertexBinding(previous, attribute.Binding);
+        const auto* right = FindVertexBinding(current, attribute.Binding);
+        auto* destination = FindVertexBinding(outputBindings, attribute.Binding);
+        const size_t componentBytes = VertexFormatByteSize(attribute.Format);
+        const size_t attributeBytes = componentBytes * attribute.ComponentCount;
+        constexpr auto perVertex = Oot3dPicaVertexInputRate::PerVertex;
+        if (left == nullptr || right == nullptr || destination == nullptr || left->InputRate != perVertex ||
+            right->InputRate != perVertex || destination->InputRate != perVertex || left->ByteStride == 0U ||
+            left->ByteStride != right->ByteStride || left->ByteStride != destination->ByteStride ||
+            right->ResolvedBytes().size() != destination->ResolvedBytes().size() ||
+            attribute.ByteOffset > left->ByteStride || attributeBytes > left->ByteStride - attribute.ByteOffset) {
+            continue;
+        }
+        const auto leftBytes = left->ResolvedBytes();
+        const auto rightBytes = right->ResolvedBytes();
+        auto& destinationBytes = destination->MutableBytes();
+        const size_t stride = left->ByteStride;
+        for (uint32_t quad = 0; quad < quads; ++quad) {
+            if (sources[quad] < 0) continue;
+            for (size_t corner = 0; corner < 4U; ++corner) {
+                const size_t to = (size_t{quad} * 4U + corner) * stride + attribute.ByteOffset;
+                const size_t from = (static_cast<size_t>(sources[quad]) * 4U + corner) * stride + attribute.ByteOffset;
+                if (to + attributeBytes > rightBytes.size() || from + attributeBytes > leftBytes.size()) continue;
+                for (size_t component = 0; component < attribute.ComponentCount; ++component) {
+                    const size_t offset = component * componentBytes;
+                    interpolated |= InterpolateVertexComponent(attribute.Format, leftBytes.data() + from + offset,
+                                                               rightBytes.data() + to + offset,
+                                                               destinationBytes.data() + to + offset, alpha);
+                }
+            }
+        }
+    }
+    return interpolated;
+}
+
+// The quad pairings of a transition (alpha-independent).
+struct VisualQuadBatchPairing {
+    struct Draw {
+        int32_t First = -1;  // into Sources; -1: no remapped quads
+        uint32_t Quads = 0;
+    };
+    std::vector<int32_t> Sources;
+    std::vector<Draw> OfDraw;  // per current draw
+    Oot3dPicaVisualQuadBatchStats Stats;
+    VisualQuadScratch Scratch;
+
+    void Clear() {
+        Sources.clear();
+        OfDraw.clear();
+        Stats = {};
+    }
+    const int32_t* SourcesOf(size_t currentIndex, uint32_t& quads) const {
+        if (currentIndex >= OfDraw.size() || OfDraw[currentIndex].First < 0) return nullptr;
+        quads = OfDraw[currentIndex].Quads;
+        return Sources.data() + OfDraw[currentIndex].First;
+    }
+};
 
 bool ContinuousVertexUniformValuesDiffer(
     const Oot3dPicaVulkanDrawPlan& previous,
@@ -505,15 +816,15 @@ bool HaveMatchingStructuralLayout(const Oot3dPicaVulkanDrawPlan& previous,
     return true;
 }
 
-bool HaveMatchingPipelineLayout(const Oot3dPicaVulkanDrawPlan& previous,
-                                const Oot3dPicaVulkanDrawPlan& current) {
+bool PipelineLayoutsMatch(const Oot3dPicaVulkanDrawPlan& previous, const Oot3dPicaVulkanDrawPlan& current,
+                          bool sameVertexCount) {
     if (previous.CompositionDomain != current.CompositionDomain ||
         previous.Composition != current.Composition ||
         previous.VertexShader.StateKey != current.VertexShader.StateKey ||
         previous.FragmentShader.StateKey != current.FragmentShader.StateKey ||
         previous.Indexed != current.Indexed ||
         previous.IndicesAre16Bit != current.IndicesAre16Bit ||
-        previous.VertexCount != current.VertexCount ||
+        (sameVertexCount && previous.VertexCount != current.VertexCount) ||
         previous.VertexBindings.size() != current.VertexBindings.size() ||
         previous.VertexAttributes.size() != current.VertexAttributes.size() ||
         previous.Textures.size() != current.Textures.size() ||
@@ -555,6 +866,67 @@ bool HaveMatchingPipelineLayout(const Oot3dPicaVulkanDrawPlan& previous,
     return true;
 }
 
+bool HaveMatchingPipelineLayout(const Oot3dPicaVulkanDrawPlan& previous,
+                                const Oot3dPicaVulkanDrawPlan& current) {
+    return PipelineLayoutsMatch(previous, current, true);
+}
+
+// Two frames of one effect quad batch: the same pipeline, any quad count.
+bool HaveMatchingQuadBatchLayout(const Oot3dPicaVulkanDrawPlan& previous,
+                                 const Oot3dPicaVulkanDrawPlan& current) {
+    return PipelineLayoutsMatch(previous, current, false) && QuadBatchQuads(previous) != 0U &&
+           QuadBatchQuads(current) != 0U;
+}
+
+// The strict draw identity (ComputeOot3dPicaVisualDrawIdentity); without the
+// vertex count it is the key of a quad batch across frames.
+uint64_t HashVisualDrawIdentity(const Oot3dPicaVulkanDrawPlan& plan, bool withVertexCount) {
+    uint64_t hash = kFnvOffset;
+    HashValue(hash, plan.CompositionDomain);
+    HashValue(hash, plan.Composition.Layer);
+    HashValue(hash, plan.Composition.Provenance);
+    HashValue(hash, plan.Composition.SourcePc);
+    HashValue(hash, plan.Composition.NativeValue);
+    HashValue(hash, plan.Composition.NativeProjectedShadow);
+    HashValue(hash, plan.Composition.NativeActorGeometry);
+    HashValue(hash, plan.Composition.NativeActorIdentity);
+    const auto& temporal = plan.Composition.TemporalIdentity;
+    HashValue(hash, temporal.Owner); HashValue(hash, temporal.Instance);
+    HashValue(hash, temporal.Part); HashValue(hash, temporal.Slot); HashValue(hash, temporal.Lifetime);
+    HashValue(hash, plan.Composition.IsolatedLighting);
+    HashValue(hash, plan.VertexShader.StateKey);
+    HashValue(hash, plan.FragmentShader.StateKey);
+    HashValue(hash, plan.Indexed);
+    HashValue(hash, plan.IndicesAre16Bit);
+    if (withVertexCount) HashValue(hash, plan.VertexCount);
+    HashValue(hash, plan.State.VertexInput.PhysicalBaseAddress);
+    HashValue(hash, plan.State.VertexInput.IndexPhysicalAddress);
+    HashValue(hash, plan.State.VertexInput.VertexOffset);
+    for (const auto& loader : plan.State.VertexInput.Loaders) {
+        HashValue(hash, loader.PhysicalAddress);
+        HashValue(hash, loader.DataOffset);
+        HashValue(hash, loader.ByteStride);
+        HashValue(hash, loader.ComponentCount);
+        for (const uint8_t component : loader.Components) {
+            HashValue(hash, component);
+        }
+    }
+    for (const auto& texture : plan.Textures) {
+        HashValue(hash, texture.Slot);
+        HashValue(hash, texture.State.PhysicalAddress);
+        HashValue(hash, texture.State.Width);
+        HashValue(hash, texture.State.Height);
+        HashValue(hash, texture.State.Format);
+        HashValue(hash, texture.State.Type);
+    }
+    HashValue(hash, plan.State.Framebuffer.Width);
+    HashValue(hash, plan.State.Framebuffer.Height);
+    HashValue(hash, plan.State.Framebuffer.ColorFormat);
+    HashValue(hash, plan.State.Framebuffer.DepthFormat);
+    HashValue(hash, plan.State.Topology);
+    return hash;
+}
+
 enum class VisualDrawMatchKind : uint8_t {
     StrictUnique,
     StrictOrdinal,
@@ -588,6 +960,9 @@ struct VisualDrawDeltaFlags {
     bool LightBinding = false;
     bool PerInstanceVertex = false;
     bool PerVertex = false;
+    // An effect quad batch blended quad by quad (VisualQuadBatchPairing);
+    // PerVertex is then false.
+    bool QuadBatch = false;
 };
 
 // Draw identities of one frame, computed on first use (the later matching
@@ -935,7 +1310,10 @@ void BuildVisualDrawMatching(
         const bool oldUnique = old + 1U == oldInstances.size() || oldInstances[old + 1U].Key != key;
         const size_t previousIndex = oldInstances[old].Index;
         const size_t currentIndex = newInstances[begin].Index;
-        if (oldUnique && HaveMatchingPipelineLayout(previous.Draws[previousIndex], current.Draws[currentIndex])) {
+        // An effect quad batch keeps its partner when an effect starts or
+        // ends (another quad count): its quads are paired by shape.
+        if (oldUnique && (HaveMatchingPipelineLayout(previous.Draws[previousIndex], current.Draws[currentIndex]) ||
+                          HaveMatchingQuadBatchLayout(previous.Draws[previousIndex], current.Draws[currentIndex]))) {
             matching.PreviousByCurrent[currentIndex] = VisualDrawMatch{previousIndex, VisualDrawMatchKind::StrictUnique};
             ++matching.StrictUniqueMatches;
         }
@@ -983,6 +1361,35 @@ void BuildVisualDrawMatching(
         previousPipeline, currentPipeline,
         HaveMatchingPipelineLayout, VisualDrawMatchKind::PipelineOrdinal,
         matching.PipelineOrdinalMatches);
+    // Effect quad batches without a native key whose quad count changed: one
+    // per strict identity without the count on each side.
+    {
+        auto& previousKeys = scratch.PreviousKeys;
+        auto& currentKeys = scratch.CurrentKeys;
+        previousKeys.clear();
+        currentKeys.clear();
+        for (size_t i = 0; i < previous.Draws.size(); ++i)
+            if (scratch.PreviousMatched[i] == 0U && QuadBatchQuads(previous.Draws[i]) != 0U)
+                previousKeys.emplace_back(HashVisualDrawIdentity(previous.Draws[i], false), static_cast<uint32_t>(i));
+        for (size_t i = 0; i < current.Draws.size(); ++i)
+            if (scratch.CurrentMatched[i] == 0U && QuadBatchQuads(current.Draws[i]) != 0U)
+                currentKeys.emplace_back(HashVisualDrawIdentity(current.Draws[i], false), static_cast<uint32_t>(i));
+        if (!previousKeys.empty() && !currentKeys.empty()) {
+            std::sort(previousKeys.begin(), previousKeys.end());
+            std::sort(currentKeys.begin(), currentKeys.end());
+            ForEachCommonVisualGroup(previousKeys, currentKeys,
+                                     [&](std::span<const VisualKeyedDraw> before, std::span<const VisualKeyedDraw> after) {
+                if (before.size() != 1U || after.size() != 1U) return;
+                const size_t previousIndex = before[0].second;
+                const size_t currentIndex = after[0].second;
+                if (!HaveMatchingQuadBatchLayout(previous.Draws[previousIndex], current.Draws[currentIndex])) return;
+                matching.PreviousByCurrent[currentIndex] = VisualDrawMatch{previousIndex, VisualDrawMatchKind::StrictUnique};
+                scratch.PreviousMatched[previousIndex] = 1U;
+                scratch.CurrentMatched[currentIndex] = 1U;
+                ++matching.StrictUniqueMatches;
+            });
+        }
+    }
 
     const auto actualMatches = static_cast<size_t>(std::count_if(
         matching.PreviousByCurrent.begin(), matching.PreviousByCurrent.end(),
@@ -1000,11 +1407,53 @@ VisualDrawMatching BuildVisualDrawMatching(
     return matching;
 }
 
+// Pairs the quads of a matched effect quad batch when its quads moved or
+// their count changed; updates the delta and the counters.
+void PairMatchedQuadBatch(const Oot3dPicaVulkanDrawPlan& previousDraw, const Oot3dPicaVulkanDrawPlan& currentDraw,
+                          size_t currentIndex, uint32_t currentQuads, VisualDrawDeltaFlags& delta,
+                          VisualQuadBatchPairing& pairing) {
+    const uint32_t previousQuads = QuadBatchQuads(previousDraw);
+    if (previousQuads == 0U) return;
+    auto& stats = pairing.Stats;
+    ++stats.Paired;
+    const bool countChanged = previousQuads != currentQuads;
+    if (countChanged) ++stats.CountChanged;
+    if (!countChanged && !delta.PerVertex) return;
+    const size_t first = pairing.Sources.size();
+    pairing.Sources.resize(first + currentQuads);
+    int32_t* const sources = pairing.Sources.data() + first;
+    const auto result =
+        PairVisualQuadBatch(previousDraw, currentDraw, previousQuads, currentQuads, sources, pairing.Scratch);
+    if (result == VisualQuadPairing::Identity || (result == VisualQuadPairing::Unreadable && !countChanged)) {
+        pairing.Sources.resize(first);  // the slot-wise blend, as before
+        return;
+    }
+    if (result == VisualQuadPairing::Unreadable) std::fill(sources, sources + currentQuads, -1);
+    size_t blended = 0;
+    for (uint32_t quad = 0; quad < currentQuads; ++quad) {
+        if (sources[quad] < 0) {
+            ++stats.UnmatchedNew;
+            continue;
+        }
+        ++blended;
+        if (sources[quad] != static_cast<int32_t>(quad)) ++stats.Rematched;
+    }
+    stats.Dropped += previousQuads - blended;
+    delta.PerVertex = false;
+    if (blended == 0U) {
+        pairing.Sources.resize(first);  // drawn as it is
+        return;
+    }
+    pairing.OfDraw[currentIndex] = {static_cast<int32_t>(first), currentQuads};
+    delta.QuadBatch = true;
+}
+
 Oot3dPicaVisualTransitionStats
 AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const Oot3dPicaVisualFrame& current,
                                     const VisualDrawMatching& matching,
                                     std::vector<VisualDrawDeltaFlags>* drawDeltas = nullptr,
-                                    std::vector<double>* topTargetScratch = nullptr) {
+                                    std::vector<double>* topTargetScratch = nullptr,
+                                    VisualQuadBatchPairing* quadPairing = nullptr) {
     Oot3dPicaVisualTransitionStats stats;
     stats.PreviousDraws = previous.Draws.size();
     stats.CurrentDraws = current.Draws.size();
@@ -1028,7 +1477,13 @@ AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const 
     if (drawDeltas != nullptr) {
         drawDeltas->assign(current.Draws.size(), {});
     }
+    if (quadPairing != nullptr) {
+        quadPairing->Clear();
+        quadPairing->OfDraw.assign(current.Draws.size(), {});
+    }
     for (size_t currentIndex = 0; currentIndex < current.Draws.size(); ++currentIndex) {
+        const uint32_t currentQuads = quadPairing != nullptr ? QuadBatchQuads(current.Draws[currentIndex]) : 0U;
+        if (currentQuads != 0U) ++quadPairing->Stats.Batches;
         if (!matching.PreviousByCurrent[currentIndex].has_value()) {
             continue;
         }
@@ -1042,6 +1497,9 @@ AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const 
             EqualIndexBytes(previousDraw, currentDraw) &&
             InterpolatableVertexValuesDiffer(
                 previousDraw, currentDraw, Oot3dPicaVertexInputRate::PerVertex);
+        if (currentQuads != 0U) {
+            PairMatchedQuadBatch(previousDraw, currentDraw, currentIndex, currentQuads, delta, *quadPairing);
+        }
         delta.VertexUniforms =
             ContinuousVertexUniformValuesDiffer(previousDraw, currentDraw);
         delta.FragmentUniforms =
@@ -1052,7 +1510,7 @@ AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const 
             previousDraw.State.OutputMerger.Blend.ConstantColor !=
             currentDraw.State.OutputMerger.Blend.ConstantColor;
         delta.LightBinding = previousDraw.LightBinding != currentDraw.LightBinding;
-        delta.Continuous = delta.PerInstanceVertex || delta.PerVertex ||
+        delta.Continuous = delta.PerInstanceVertex || delta.PerVertex || delta.QuadBatch ||
                            delta.VertexUniforms || delta.FragmentUniforms ||
                            delta.Viewport || delta.BlendConstantColor || delta.LightBinding;
         if (delta.Continuous) {
@@ -1061,7 +1519,7 @@ AnalyzeVisualTransitionWithMatching(const Oot3dPicaVisualFrame& previous, const 
         if (delta.PerInstanceVertex) {
             ++stats.ChangedPerInstanceVertexDraws;
         }
-        if (delta.PerVertex) {
+        if (delta.PerVertex || delta.QuadBatch) {
             ++stats.ChangedPerVertexDraws;
         }
         if (drawDeltas != nullptr) {
@@ -1819,7 +2277,8 @@ void InterpolateCompatibleVisualRenderState(
 void InterpolateCompatibleVisualDraw(const Oot3dPicaVulkanDrawPlan& previous, const Oot3dPicaVulkanDrawPlan& current,
                                      float alpha, Oot3dPicaVulkanDrawPlan& output,
                                      VisualSceneLightInterpolation& scenePoints,
-                                     const VisualFactoredPalette* palette = nullptr) {
+                                     const VisualFactoredPalette* palette = nullptr,
+                                     const int32_t* quadSources = nullptr, uint32_t quads = 0U) {
     output = current;
     InterpolateCompatibleVisualRenderState(previous, current, alpha, output.VertexShader.Uniforms,
                                            output.FragmentShader.Uniforms, output.State.Viewport,
@@ -1829,8 +2288,11 @@ void InterpolateCompatibleVisualDraw(const Oot3dPicaVulkanDrawPlan& previous, co
         previous, current, alpha, Oot3dPicaVertexInputRate::PerInstance,
         output.VertexBindings);
     bool perVertexInterpolated = false;
-    if (previous.BaseVertex == current.BaseVertex &&
-        EqualIndexBytes(previous, current)) {
+    if (quadSources != nullptr) {
+      perVertexInterpolated =
+          InterpolateQuadBatchVertices(previous, current, alpha, quadSources, quads, output.VertexBindings);
+    } else if (previous.BaseVertex == current.BaseVertex &&
+               EqualIndexBytes(previous, current)) {
       perVertexInterpolated = InterpolateVertexValues(
           previous, current, alpha, Oot3dPicaVertexInputRate::PerVertex,
           output.VertexBindings);
@@ -1842,7 +2304,8 @@ void InterpolateCompatibleVisualDraw(const Oot3dPicaVulkanDrawPlan& previous, co
 
 bool SampleVisualFrameWithMatching(const Oot3dPicaVisualFrame& previous, const Oot3dPicaVisualFrame& current,
                                    float alpha, const VisualDrawMatching& matching, Oot3dPicaVisualFrameSample& output,
-                                   const std::vector<VisualDrawDeltaFlags>* drawDeltas = nullptr) {
+                                   const std::vector<VisualDrawDeltaFlags>& drawDeltas,
+                                   const VisualQuadBatchPairing& quadPairing) {
     output.TopTransfer = current.TopTransfer;
     output.MatchedDraws = matching.StrictUniqueMatches + matching.StrictOrdinalMatches +
                           matching.StructuralOrdinalMatches + matching.PipelineOrdinalMatches;
@@ -1867,44 +2330,18 @@ bool SampleVisualFrameWithMatching(const Oot3dPicaVisualFrame& previous, const O
         auto& sampled = output.Draws[currentIndex];
         if (match.has_value()) {
             const auto& previousDraw = previous.Draws[match->PreviousIndex];
+            uint32_t quads = 0U;
+            const int32_t* quadSources = quadPairing.SourcesOf(currentIndex, quads);
             InterpolateCompatibleVisualDraw(previousDraw, currentDraw, alpha, sampled, scenePoints,
-                                            palettes.empty() ? nullptr : &palettes[currentIndex]);
-            VisualDrawDeltaFlags delta;
-            if (drawDeltas != nullptr) {
-                delta = (*drawDeltas)[currentIndex];
-            } else {
-                delta.PerInstanceVertex =
-                    InterpolatableVertexValuesDiffer(previousDraw, currentDraw, Oot3dPicaVertexInputRate::PerInstance);
-                delta.PerVertex =
-                    previousDraw.BaseVertex == currentDraw.BaseVertex &&
-                    EqualIndexBytes(previousDraw, currentDraw) &&
-                    InterpolatableVertexValuesDiffer(
-                        previousDraw, currentDraw,
-                        Oot3dPicaVertexInputRate::PerVertex);
-                delta.VertexUniforms =
-                    ContinuousVertexUniformValuesDiffer(previousDraw,
-                                                        currentDraw);
-                delta.FragmentUniforms =
-                    ContinuousFragmentUniformValuesDiffer(previousDraw,
-                                                          currentDraw);
-                delta.Viewport = ContinuousViewportValuesDiffer(previousDraw,
-                                                                currentDraw);
-                delta.BlendConstantColor =
-                    previousDraw.State.OutputMerger.Blend.ConstantColor !=
-                    currentDraw.State.OutputMerger.Blend.ConstantColor;
-                delta.LightBinding = previousDraw.LightBinding != currentDraw.LightBinding;
-                delta.Continuous =
-                    delta.PerInstanceVertex || delta.PerVertex ||
-                    delta.VertexUniforms || delta.FragmentUniforms ||
-                    delta.Viewport || delta.BlendConstantColor || delta.LightBinding;
-            }
+                                            palettes.empty() ? nullptr : &palettes[currentIndex], quadSources, quads);
+            const VisualDrawDeltaFlags& delta = drawDeltas[currentIndex];
             if (delta.Continuous) {
                 ++output.InterpolatedDraws;
             }
             if (delta.PerInstanceVertex) {
                 ++output.InterpolatedPerInstanceVertexDraws;
             }
-            if (delta.PerVertex) {
+            if (delta.PerVertex || delta.QuadBatch) {
                 ++output.InterpolatedPerVertexDraws;
             }
         } else {
@@ -1928,6 +2365,7 @@ bool SampleVisualFrameViewWithMatching(const Oot3dPicaVisualFrame& previous, con
                                        float alpha, const VisualDrawMatching& matching,
                                        Oot3dPicaVisualFrameViewSample& output,
                                        const std::vector<VisualDrawDeltaFlags>& drawDeltas,
+                                       const VisualQuadBatchPairing& quadPairing,
                                        const std::vector<VisualFactoredPalette>* preparedPalettes = nullptr) {
     output.TopTransfer = current.TopTransfer;
     output.MemoryFills = current.MemoryFills;
@@ -2010,7 +2448,9 @@ bool SampleVisualFrameViewWithMatching(const Oot3dPicaVisualFrame& previous, con
                 previousDraw, currentDraw, alpha,
                 *sampled.BlendConstantColor);
         }
-        if (delta.PerInstanceVertex || delta.PerVertex) {
+        uint32_t quads = 0U;
+        const int32_t* quadSources = delta.QuadBatch ? quadPairing.SourcesOf(currentIndex, quads) : nullptr;
+        if (delta.PerInstanceVertex || delta.PerVertex || quadSources != nullptr) {
             sampled.VertexBindings = currentDraw.VertexBindings;
             sampled.HasVertexBindingOverrides = true;
             if (delta.PerInstanceVertex) {
@@ -2021,6 +2461,10 @@ bool SampleVisualFrameViewWithMatching(const Oot3dPicaVisualFrame& previous, con
                 InterpolateVertexValues(previousDraw, currentDraw, alpha, Oot3dPicaVertexInputRate::PerVertex,
                                         sampled.VertexBindings);
             }
+            if (quadSources != nullptr) {
+                InterpolateQuadBatchVertices(previousDraw, currentDraw, alpha, quadSources, quads,
+                                             sampled.VertexBindings);
+            }
         }
         if (delta.Continuous) {
             ++output.InterpolatedDraws;
@@ -2028,7 +2472,7 @@ bool SampleVisualFrameViewWithMatching(const Oot3dPicaVisualFrame& previous, con
         if (delta.PerInstanceVertex) {
             ++output.InterpolatedPerInstanceVertexDraws;
         }
-        if (delta.PerVertex) {
+        if (delta.PerVertex || delta.QuadBatch) {
             ++output.InterpolatedPerVertexDraws;
         }
     }
@@ -2366,6 +2810,7 @@ struct Oot3dPicaPreparedVisualTransition::Impl {
     mutable bool PalettesReady = false;
     Oot3dPicaVisualTransitionOptions Options;
     VisualUnmatchedCarry Carry;
+    VisualQuadBatchPairing Quads;
 };
 
 Oot3dPicaPreparedVisualTransition::Oot3dPicaPreparedVisualTransition()
@@ -2395,7 +2840,7 @@ bool Oot3dPicaPreparedVisualTransition::Prepare(
     BuildVisualDrawMatching(previous, current, mImpl->Matching, mImpl->MatchingScratch);
     const auto analysisStart = std::chrono::steady_clock::now();
     mImpl->Transition = AnalyzeVisualTransitionWithMatching(
-        previous, current, mImpl->Matching, &mImpl->DrawDeltas, &mImpl->TopTargetDeltas);
+        previous, current, mImpl->Matching, &mImpl->DrawDeltas, &mImpl->TopTargetDeltas, &mImpl->Quads);
     const auto finished = std::chrono::steady_clock::now();
     if (timing != nullptr) {
         timing->MatchingNanoseconds += static_cast<uint64_t>(
@@ -2443,7 +2888,7 @@ bool Oot3dPicaPreparedVisualTransition::Sample(
     }
     const bool sampled = SampleVisualFrameViewWithMatching(
         previous, current, alpha, mImpl->Matching, output,
-        mImpl->DrawDeltas, &mImpl->Palettes);
+        mImpl->DrawDeltas, mImpl->Quads, &mImpl->Palettes);
     if (sampled && mImpl->Options.CarryUnmatched) {
         ApplyVisualUnmatchedCarry(previous, current, mImpl->Carry, alpha, output);
     }
@@ -2474,6 +2919,7 @@ void Oot3dPicaPreparedVisualTransition::Reset() noexcept {
     mImpl->DrawDeltas.clear();
     mImpl->PalettesReady = false;
     mImpl->Carry.Clear();
+    mImpl->Quads.Clear();
     mImpl->Transition = {};
     mImpl->PreviousSequence = 0U;
     mImpl->CurrentSequence = 0U;
@@ -2509,6 +2955,12 @@ Oot3dPicaPreparedVisualTransition::Stats() const noexcept {
     return mImpl != nullptr ? mImpl->Transition : unavailable;
 }
 
+const Oot3dPicaVisualQuadBatchStats&
+Oot3dPicaPreparedVisualTransition::QuadBatchStats() const noexcept {
+    static const Oot3dPicaVisualQuadBatchStats none;
+    return mImpl != nullptr ? mImpl->Quads.Stats : none;
+}
+
 int64_t Oot3dPicaPreparedVisualTransition::PreviousIndexOf(
     size_t currentIndex, uint8_t* kind) const noexcept {
     if (mImpl == nullptr || !mImpl->Prepared ||
@@ -2534,50 +2986,7 @@ Oot3dPicaVulkanDrawOverrides Oot3dPicaVisualDrawView::Overrides() const {
 
 uint64_t
 ComputeOot3dPicaVisualDrawIdentity(const Oot3dPicaVulkanDrawPlan& plan) {
-    uint64_t hash = kFnvOffset;
-    HashValue(hash, plan.CompositionDomain);
-    HashValue(hash, plan.Composition.Layer);
-    HashValue(hash, plan.Composition.Provenance);
-    HashValue(hash, plan.Composition.SourcePc);
-    HashValue(hash, plan.Composition.NativeValue);
-    HashValue(hash, plan.Composition.NativeProjectedShadow);
-    HashValue(hash, plan.Composition.NativeActorGeometry);
-    HashValue(hash, plan.Composition.NativeActorIdentity);
-    const auto& temporal = plan.Composition.TemporalIdentity;
-    HashValue(hash, temporal.Owner); HashValue(hash, temporal.Instance);
-    HashValue(hash, temporal.Part); HashValue(hash, temporal.Slot); HashValue(hash, temporal.Lifetime);
-    HashValue(hash, plan.Composition.IsolatedLighting);
-    HashValue(hash, plan.VertexShader.StateKey);
-    HashValue(hash, plan.FragmentShader.StateKey);
-    HashValue(hash, plan.Indexed);
-    HashValue(hash, plan.IndicesAre16Bit);
-    HashValue(hash, plan.VertexCount);
-    HashValue(hash, plan.State.VertexInput.PhysicalBaseAddress);
-    HashValue(hash, plan.State.VertexInput.IndexPhysicalAddress);
-    HashValue(hash, plan.State.VertexInput.VertexOffset);
-    for (const auto& loader : plan.State.VertexInput.Loaders) {
-        HashValue(hash, loader.PhysicalAddress);
-        HashValue(hash, loader.DataOffset);
-        HashValue(hash, loader.ByteStride);
-        HashValue(hash, loader.ComponentCount);
-        for (const uint8_t component : loader.Components) {
-            HashValue(hash, component);
-        }
-    }
-    for (const auto& texture : plan.Textures) {
-        HashValue(hash, texture.Slot);
-        HashValue(hash, texture.State.PhysicalAddress);
-        HashValue(hash, texture.State.Width);
-        HashValue(hash, texture.State.Height);
-        HashValue(hash, texture.State.Format);
-        HashValue(hash, texture.State.Type);
-    }
-    HashValue(hash, plan.State.Framebuffer.Width);
-    HashValue(hash, plan.State.Framebuffer.Height);
-    HashValue(hash, plan.State.Framebuffer.ColorFormat);
-    HashValue(hash, plan.State.Framebuffer.DepthFormat);
-    HashValue(hash, plan.State.Topology);
-    return hash;
+    return HashVisualDrawIdentity(plan, true);
 }
 
 bool AreOot3dPicaVisualDrawsCompatible(const Oot3dPicaVulkanDrawPlan& previous,
@@ -2609,7 +3018,10 @@ bool SampleOot3dPicaVisualFrame(const Oot3dPicaVisualFrame& previous,
                                 float alpha,
                                 Oot3dPicaVisualFrameSample& output) {
     const auto matching = BuildVisualDrawMatching(previous, current);
-    return SampleVisualFrameWithMatching(previous, current, alpha, matching, output);
+    std::vector<VisualDrawDeltaFlags> drawDeltas;
+    VisualQuadBatchPairing quads;
+    AnalyzeVisualTransitionWithMatching(previous, current, matching, &drawDeltas, nullptr, &quads);
+    return SampleVisualFrameWithMatching(previous, current, alpha, matching, output, drawDeltas, quads);
 }
 
 bool AnalyzeAndSampleOot3dPicaVisualFrame(const Oot3dPicaVisualFrame& previous, const Oot3dPicaVisualFrame& current,
@@ -2617,8 +3029,9 @@ bool AnalyzeAndSampleOot3dPicaVisualFrame(const Oot3dPicaVisualFrame& previous, 
                                           Oot3dPicaVisualFrameSample& output) {
     const auto matching = BuildVisualDrawMatching(previous, current);
     std::vector<VisualDrawDeltaFlags> drawDeltas;
-    stats = AnalyzeVisualTransitionWithMatching(previous, current, matching, &drawDeltas);
-    return SampleVisualFrameWithMatching(previous, current, alpha, matching, output, &drawDeltas);
+    VisualQuadBatchPairing quads;
+    stats = AnalyzeVisualTransitionWithMatching(previous, current, matching, &drawDeltas, nullptr, &quads);
+    return SampleVisualFrameWithMatching(previous, current, alpha, matching, output, drawDeltas, quads);
 }
 
 bool AnalyzeAndSampleOot3dPicaVisualFrameView(const Oot3dPicaVisualFrame& previous, const Oot3dPicaVisualFrame& current,
@@ -2629,10 +3042,11 @@ bool AnalyzeAndSampleOot3dPicaVisualFrameView(const Oot3dPicaVisualFrame& previo
     const auto matching = BuildVisualDrawMatching(previous, current);
     const auto analysisStart = std::chrono::steady_clock::now();
     std::vector<VisualDrawDeltaFlags> drawDeltas;
-    stats = AnalyzeVisualTransitionWithMatching(previous, current, matching, &drawDeltas);
+    VisualQuadBatchPairing quads;
+    stats = AnalyzeVisualTransitionWithMatching(previous, current, matching, &drawDeltas, nullptr, &quads);
     const auto samplingStart = std::chrono::steady_clock::now();
     const bool sampled = SampleVisualFrameViewWithMatching(
-        previous, current, alpha, matching, output, drawDeltas);
+        previous, current, alpha, matching, output, drawDeltas, quads);
     if (timing != nullptr) {
         const auto finished = std::chrono::steady_clock::now();
         timing->MatchingNanoseconds += static_cast<uint64_t>(

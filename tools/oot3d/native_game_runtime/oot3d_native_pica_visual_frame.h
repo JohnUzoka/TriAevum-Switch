@@ -249,6 +249,23 @@ struct Oot3dPicaVisualUnmatchedStats {
     bool CameraMeasured = false;
 };
 
+// The game's effect quad batches (RendererQuad: ripples, splashes, dust,
+// sparks, rain and snow, light glows). The game rebuilds one per effect
+// type every frame on the CPU: four corners a quad, already transformed,
+// sorted by depth, so quad k of one frame is not quad k of the next. The
+// in-between frame pairs their quads by shape instead of by slot.
+// Quad-list draws above this many quads keep the slot-wise blend.
+inline constexpr uint32_t kOot3dPicaVisualQuadBatchMaximumQuads = 256U;
+
+struct Oot3dPicaVisualQuadBatchStats {
+    size_t Batches = 0;       // quad-batch draws in the current frame
+    size_t Paired = 0;        // of them, with a previous batch
+    size_t CountChanged = 0;  // paired with another quad count
+    size_t Rematched = 0;     // quads blended from another slot
+    size_t UnmatchedNew = 0;  // quads of paired batches drawn as they are
+    size_t Dropped = 0;       // previous quads of paired batches left out
+};
+
 // Draw matching and transition analysis are immutable for a pair of source
 // frames. Prepare once, then sample at 1/2 for 2x or at 1/3 and 2/3 for 3x
 // without repeating the matching work on every host presentation.
@@ -280,6 +297,8 @@ class Oot3dPicaPreparedVisualTransition final {
     [[nodiscard]] const Oot3dPicaVisualUnmatchedStats& UnmatchedStats() const noexcept;
     [[nodiscard]] bool Ready() const noexcept;
     [[nodiscard]] const Oot3dPicaVisualTransitionStats& Stats() const noexcept;
+    // Of the last Prepare().
+    [[nodiscard]] const Oot3dPicaVisualQuadBatchStats& QuadBatchStats() const noexcept;
     // The previous-frame draw paired with a current draw (and how: 0 strict
     // unique, 1 strict ordinal, 2 structural ordinal, 3 pipeline ordinal),
     // or -1. For tests and diagnostics.

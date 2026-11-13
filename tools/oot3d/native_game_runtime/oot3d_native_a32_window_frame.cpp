@@ -1889,7 +1889,15 @@ bool NativeA32WindowSession::RunFrame() {
                << " inserted_prev=" << perTransition(now.InsertedPrevious, before.InsertedPrevious)
                << " unmatched_no_camera=" << perTransition(now.WithoutCamera, before.WithoutCamera)
                << " camera_measured=" << (now.CameraMeasured - before.CameraMeasured)
-               << " discontinuities=" << (now.Discontinuities - before.Discontinuities);
+               << " discontinuities=" << (now.Discontinuities - before.Discontinuities)
+               // Effect quad batches (ripples, splashes, dust...): window
+               // totals of the in-between frames' pairing by shape.
+               << " quad_batches=" << (now.QuadBatches - before.QuadBatches)
+               << " quad_paired=" << (now.QuadPaired - before.QuadPaired)
+               << " quad_count_changed=" << (now.QuadCountChanged - before.QuadCountChanged)
+               << " quad_rematched=" << (now.QuadRematched - before.QuadRematched)
+               << " quad_new=" << (now.QuadNew - before.QuadNew)
+               << " quad_dropped=" << (now.QuadDropped - before.QuadDropped);
         }
         perf << " est_step_ms=" << current.StepCostMs
              << " est_full_ms=" << current.FullEstimateMs
@@ -4404,6 +4412,13 @@ void NativeA32WindowSession::PresentVisualFrame(
                   totals.WithoutCamera += unmatched.WithoutCamera;
                   totals.CameraMeasured += unmatched.CameraMeasured ? 1U : 0U;
                   totals.Discontinuities += continuousTransition ? 0U : 1U;
+                  const auto &quads = preparedVisualTransition.QuadBatchStats();
+                  totals.QuadBatches += quads.Batches;
+                  totals.QuadPaired += quads.Paired;
+                  totals.QuadCountChanged += quads.CountChanged;
+                  totals.QuadRematched += quads.Rematched;
+                  totals.QuadNew += quads.UnmatchedNew;
+                  totals.QuadDropped += quads.Dropped;
                 }
                 if (launch.ExtendedDiagnostics) {
                   if (visualTransitionEvents.size() == 1024U) {
