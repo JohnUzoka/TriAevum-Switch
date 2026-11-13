@@ -2863,6 +2863,37 @@ GUARDS = [
           "runtime/three_ds_recomp/include/fast/oot3d/message_button_glyphs.h",
           r'\{192U, 32U, kMessageGlyphZl\},\s+\{208U, 32U, kMessageGlyphZr\},\s+\{0U, 48U, kMessageGlyphZl\},\s+\{16U, 48U, kMessageGlyphZr\},',
           "oot3d_message_button_glyphs_tests (CheckRewrite)"),
+    # --- 11/13: N64 idle animations, L3+R3 > Game > Gameplay (config/no_n64_idle_animations, on by default) ---
+    # OoT3D swaps waitF_typeD_20f (0x1A) for 0x1C and wait_itemC_20f (0x15) for 0x14 right after the fidget
+    # table load in Player_Action_Idle (0x004BA8CC..0x004BA8F8); the hook resumes past the swap (0x004BA8FC).
+    Guard("N64 idle animations: on by default (off only with config/no_n64_idle_animations)",
+          "tools/oot3d/native_game_runtime/oot3d_n64_idle_animations.h",
+          r'N64IdleAnimationsEnabled\(\) noexcept \{\s+static std::atomic<bool> enabled\{true\};.*?'
+          r'return !std::filesystem::exists\(config / kN64IdleAnimationsOffConfigName, error\);',
+          "oot3d_n64_idle_animations_tests (TestConfig)"),
+    Guard("N64 idle animations: the hook, resume and table addresses, and only the two swapped animations",
+          "tools/oot3d/native_game_runtime/oot3d_n64_idle_animations.h",
+          r'kN64IdleAnimationsHookPc = 0x004BA8CCU;.*?kN64IdleAnimationsResumePc = 0x004BA8FCU;.*?'
+          r'kN64IdleFidgetTable = 0x0053AB38U;.*?'
+          r'return animation == kN64IdleStretchUnarmed \|\| animation == kN64IdleShield;',
+          "oot3d_n64_idle_animations_tests (TestEveryFidget)"),
+    Guard("N64 idle animations: the resume gets the block's own r0/r1/r6, never a partial write",
+          "tools/oot3d/native_game_runtime/oot3d_n64_idle_animations.h",
+          r'if \(!memory\.Read32\(entry, &animation\) \|\| !IsSwappedN64IdleFidget\(animation\)\) return false;.*?'
+          r'r\[0\] = r0;\s+r\[1\] = modelAnimType;\s+r\[6\] = animation;\s+return true;',
+          "oot3d_n64_idle_animations_tests (TestEveryFidget, TestRefusals)"),
+    Guard("N64 idle animations: the policy leaves the graph past the swap only on the decision",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_projection_policy.cpp",
+          r'pc == Oot3dNativeGame::kN64IdleAnimationsHookPc && wholeAotExecutionActive &&\s+'
+          r'Oot3dNativeGame::N64IdleAnimationsEnabled\(\)\.load\(std::memory_order_relaxed\) &&\s+'
+          r'Oot3dNativeGame::RestoreN64IdleFidget\(memory, state\.r\)\) \{.*?'
+          r'Oot3dWholeAotExitAt\(Oot3dNativeGame::kN64IdleAnimationsResumePc, state\)',
+          "oot3d_n64_idle_animations_tests"),
+    Guard("N64 idle animations: the hook is in every configuration and both PCs must be title-module blocks",
+          "tools/oot3d/native_game_runtime/oot3d_native_block_entry_hooks.cpp",
+          r'add\("gameplay_options", std::array\{kN64IdleAnimationsHookPc\}\);.*?'
+          r'std::vector<uint32_t> Oot3dGameplayOptionBlockPcs\(\) \{[^}]*kN64IdleAnimationsHookPc, kN64IdleAnimationsResumePc\}',
+          "oot3d_native_block_entry_hooks_tests, whole_aot_hook_gates_census"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

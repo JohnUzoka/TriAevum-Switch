@@ -3,6 +3,7 @@
 #include "oot3d_damage_multiplier.h"
 #include "oot3d_landing_roll.h"
 #include "oot3d_master_quest_mirror.h"
+#include "oot3d_n64_idle_animations.h"
 #include "oot3d_quick_put_away.h"
 #include "oot3d_roll_dash.h"
 #include "oot3d_simple_shadow.h"
@@ -55,6 +56,8 @@ std::vector<Oot3dBlockEntryHookSource> Oot3dNativeBlockEntryHookSources(
                                      kMasterQuestMirrorApplyPc, kSimpleShadowHookPc});
   for (const auto &read : kMasterQuestMirrorReads)
     hooks.push_back({read.HookPc, "master_quest_mirror"});
+  // N64 idle animations (oot3d_n64_idle_animations.h): always hooked too.
+  add("gameplay_options", std::array{kN64IdleAnimationsHookPc});
   add("actor_visibility", NativeActorVisibilityHookPcs());
   add("pica_composition", Oot3dNativePicaCompositionHookPcs());
   if (options.PlayerTemporal)
@@ -169,7 +172,8 @@ std::vector<uint32_t> Oot3dNativeAllBlockEntryHookPcs() {
 
 std::vector<uint32_t> Oot3dGameplayOptionBlockPcs() {
   std::vector<uint32_t> pcs{kDamageMultiplierHookPc, kQuickPutAwayHookPc, kQuickPutAwayStorePc,
-                            kMasterQuestMirrorApplyPc, kSimpleShadowHookPc};
+                            kMasterQuestMirrorApplyPc, kSimpleShadowHookPc,
+                            kN64IdleAnimationsHookPc, kN64IdleAnimationsResumePc};
   for (const auto &read : kMasterQuestMirrorReads) pcs.push_back(read.HookPc);
   std::sort(pcs.begin(), pcs.end());
   return pcs;

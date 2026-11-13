@@ -6,6 +6,7 @@
 #include "oot3d_damage_multiplier.h"
 #include "oot3d_landing_roll.h"
 #include "oot3d_master_quest_mirror.h"
+#include "oot3d_n64_idle_animations.h"
 #include "oot3d_quick_put_away.h"
 #include "oot3d_roll_dash.h"
 #include "oot3d_simple_shadow.h"
@@ -75,6 +76,8 @@ std::vector<uint32_t> PreviousInlineAssembly(const Oot3dBlockEntryHookOptions &o
                                                  Oot3dNativeGame::kSimpleShadowHookPc});
   for (const auto &read : Oot3dNativeGame::kMasterQuestMirrorReads)
     blockEntryHooks.push_back(read.HookPc);
+  // N64 idle animations (11/13): always hooked, inert while it is off.
+  blockEntryHooks.push_back(Oot3dNativeGame::kN64IdleAnimationsHookPc);
   const auto actorVisibilityHooks = Oot3dNativeGame::NativeActorVisibilityHookPcs();
   blockEntryHooks.insert(blockEntryHooks.end(), actorVisibilityHooks.begin(),
                          actorVisibilityHooks.end());
@@ -222,7 +225,8 @@ void TestEveryConfigurationMatchesThePreviousInlineAssembly() {
   std::vector<uint32_t> gameplayOptions{Oot3dNativeGame::kDamageMultiplierHookPc,
                                         Oot3dNativeGame::kQuickPutAwayHookPc,
                                         Oot3dNativeGame::kMasterQuestMirrorApplyPc,
-                                        Oot3dNativeGame::kSimpleShadowHookPc};
+                                        Oot3dNativeGame::kSimpleShadowHookPc,
+                                        Oot3dNativeGame::kN64IdleAnimationsHookPc};
   for (const auto &read : Oot3dNativeGame::kMasterQuestMirrorReads)
     gameplayOptions.push_back(read.HookPc);
   for (const uint32_t pc : gameplayOptions)

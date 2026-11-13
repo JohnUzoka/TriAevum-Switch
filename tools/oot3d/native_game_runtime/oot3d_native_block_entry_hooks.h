@@ -57,9 +57,10 @@ std::vector<uint32_t> Oot3dNativeAllBlockEntryHookPcs();
 // Every condition on (the union).
 Oot3dBlockEntryHookOptions Oot3dAllBlockEntryHookOptions() noexcept;
 
-// The gameplay options' hooks and the quick put-away's resume pc, sorted: a
-// gate runs only where the whole-AOT code starts a block, which the Master
-// Quest mirror reads get from whole_aot_observed_sites.json.
+// The gameplay options' hooks and the resume pcs of quick put-away and the
+// N64 idle animations, sorted: a gate runs only where the whole-AOT code
+// starts a block, which the Master Quest mirror reads get from
+// whole_aot_observed_sites.json.
 std::vector<uint32_t> Oot3dGameplayOptionBlockPcs();
 
 } // namespace Oot3dNativeGame

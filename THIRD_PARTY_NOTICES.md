@@ -508,10 +508,11 @@ Three files of the Switch port adapt code from
 
 ## Decompilation references
 
-The Switch port's landing roll (`oot3d_landing_roll.h`) follows the rule of
-`z_player.c` in the [zeldaret/oot](https://github.com/zeldaret/oot)
-decompilation, and the actor names of the cost profile
-(`oot3d_native_actor_names.h`) are its actor table's overlay names. That
+The Switch port's landing roll (`oot3d_landing_roll.h`) and N64 idle
+animations (`oot3d_n64_idle_animations.h`) follow the rule of `z_player.c` in
+the [zeldaret/oot](https://github.com/zeldaret/oot) decompilation, and the
+actor names of the cost profile (`oot3d_native_actor_names.h`) are its actor
+table's overlay names. That
 repository has no license: no code is copied, only the behaviour and the
 names, as identifiers.
 

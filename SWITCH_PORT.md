@@ -1078,6 +1078,47 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Fix:** the 21 texts of `logs/deko3d_shaders/` went to `shaders/console-missing/` (86 files); uam compiles
   all of them, no scratch. The release build adds them and their lighting variants to the pack.
 
+### N64 idle animations: L3+R3 > Game > Gameplay (`config/no_n64_idle_animations`, user 11/13, on by default)
+- **Request:** "bring back the old unused N64 idle animation". TCRF (OoT3D/Unused Link Animations): "Link's unarmed
+  stretching and shield fidget idle animations are disabled".
+- **Cause (EUR code.bin, Capstone):** `Player_Action_Idle` (`0x004BA538`) inlines N64's `Player_CheckForIdleAnim` and
+  `Player_ChooseNextIdleAnim` with the same selection (Rand_ZeroOne `0x003759D0` × 5.0, shield hand `+0x1B5 == 10`,
+  `0x0033100C` / `0x0035D260`, the environment type at play `+0x4C32`). The fidget table `0x0053AB38` (15 pairs of u32
+  animation ids: N64's 14 and ca_wait_typeA; the first with modelAnimType `+0x1B3 == 1`) is unchanged, but the block
+  after its load swaps two entries: `0x1A` waitF_typeD_20f (unarmed stretch, rooms of environment type 4-6) → `0x1C`
+  waitF_itemA_20f, and `0x15` wait_itemC_20f (shield fidget) → `0x14` wait_itemD1_20f (`0x004BA8E8..0x004BA8F8`).
+  Animation id = csab index of `zelda_link_boy_new.zar` / `zelda_link_child_new.zar` (both still have 0x1A, 137
+  frames, and 0x15, 92 frames, the same bytes in both); their sounds are still in the fidget sound tables
+  (`0x0053BFCC`). wait_itemD2_20f (`0x13`) stays unused as on N64 (unreachable selection, zeldaret/oot "@bug").
+- **Fix (no generated-code change):** block-entry hook `0x004BA8CC` (table load): when the entry is 0x1A or 0x15 the
+  policy leaves the whole-AOT graph at `0x004BA8FC` (after the swap) with the block's own r0/r1/r6
+  (`RestoreN64IdleFidget`, `oot3d_n64_idle_animations.h`); every other fidget runs the game's block. Both PCs are block
+  starts and dispatch entries of `fork-gen-432c798dde-674182a5-pgo` (shard 102) and are in
+  `Oot3dGameplayOptionBlockPcs`. `whole_aot_hook_gates.json`: 377 PCs (one new); the release build's C++
+  regeneration (`generate_whole_aot_cpp.py --sparse-block-entries`) reads it, no program regeneration needed.
+- **Option and log:** checkbox under "Landing roll (N64)", applied at once; off writes `config/no_n64_idle_animations`.
+  Game log `gameplay: ... n64_idle_animations=on|off ...`. Cost: one hook per fidget choice (every other idle cycle).
+- **Check [not done on the console]:** child, Link's house, stand still unarmed for ~1 minute: besides the look-around,
+  tunic and foot-tap fidgets, Link stretches with the relax voice (OoT3D: the tunic instead). Same as adult in
+  Kakariko. Sword and shield drawn, stand still: Link adjusts his shield with the shield sounds (OoT3D: the sword
+  swing); with only a sword drawn (no shield owned) N64 also shows it. Option off: the old OoT3D fidgets.
+- Tests: `oot3d_n64_idle_animations_tests` (every fidget type × modelAnimType against a model of the game's block with
+  and without the swap; the two animations; refusals; the config file). Guards "N64 idle animations".
+
+### TAS shader corpus: 81 texts from a Citra replay with this fork's generator (user, 11/13)
+- **Why:** missing shaders were found one area at a time from players' logs. Upstream (coccofresco) ships a
+  TAS-recorded SPIR-V corpus (`forge/shader-corpus/portable.o3ps`, 7,567 entries) that can't be turned into our
+  texts (no source or PICA state; its generator drifted, 0 of 107 console texts identical), so its method was
+  repeated with our generator.
+- **How (`oot3d-work/tas-corpus/`):** Citra Nightly 1796 (b05b5b3) replays the TASVideos all-dungeons movie 6281M
+  (repaired with `repair_ctm_repeated_pair.py`) on the USA initial-revision ROM, 1x, hardware shaders, ~68 min;
+  its transferable cache (384 records) goes through `oot3d_native_pica_cache_inventory --dialect
+  citra-legacy-v1`, the deko3d translation and `ShaderTextKey` (`collect.sh`): 336 fragment texts, 0 failures,
+  255 already in the pack (byte-identical keys), 81 new → `$OOT3D_WORK/shaders/tas-corpus/`, which
+  `build-fork.sh` compiles with the console texts. 38 of the 63 console-missing texts the upstream corpus covers came
+  out with the exact key; the others are register states Citra's cache folds together or areas the route skips
+  (the Ice Cavern, Zora's River and Fountain barely), so players' logs still matter.
+
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go
   underground" in the Forest Temple.

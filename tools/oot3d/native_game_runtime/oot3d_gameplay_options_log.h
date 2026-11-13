@@ -1,12 +1,13 @@
 #pragma once
 
 // Game log line of the damage multiplier, quick put away, unmirrored Master
-// Quest (L3+R3 > Game > Gameplay) and simple shadow (L3+R3 > Video) at start
-// and on each change, written beside Roll dash's line
-// (NativeA32WindowSession::UpdateRollDash).
+// Quest, N64 idle animations (L3+R3 > Game > Gameplay) and simple shadow
+// (L3+R3 > Video) at start and on each change, written beside Roll dash's
+// line (NativeA32WindowSession::UpdateRollDash).
 
 #include "oot3d_damage_multiplier.h"
 #include "oot3d_master_quest_mirror.h"
+#include "oot3d_n64_idle_animations.h"
 #include "oot3d_quick_put_away.h"
 #include "oot3d_simple_shadow.h"
 
@@ -23,10 +24,12 @@ public:
   // The line if an option changed since the last one.
   [[nodiscard]] std::optional<std::string> Take(bool quickPutAway, std::uint8_t damage,
                                                 bool unmirrored, bool unmirrorApplied,
-                                                bool simpleShadow, bool shadowCutscenes) {
-    const std::array<std::uint8_t, 6> now{static_cast<std::uint8_t>(quickPutAway), damage,
+                                                bool n64IdleAnimations, bool simpleShadow,
+                                                bool shadowCutscenes) {
+    const std::array<std::uint8_t, 7> now{static_cast<std::uint8_t>(quickPutAway), damage,
                                           static_cast<std::uint8_t>(unmirrored),
                                           static_cast<std::uint8_t>(unmirrorApplied),
+                                          static_cast<std::uint8_t>(n64IdleAnimations),
                                           static_cast<std::uint8_t>(simpleShadow),
                                           static_cast<std::uint8_t>(shadowCutscenes)};
     if (mLogged == now) return std::nullopt;
@@ -36,11 +39,12 @@ public:
                        " master_quest_unmirrored=" + (unmirrored ? "on" : "off");
     if (unmirrored != unmirrorApplied)
       line += " (applies at the next file load or pause menu close)";
+    line += std::string(" n64_idle_animations=") + (n64IdleAnimations ? "on" : "off");
     line += std::string(" simple_shadow=") + (simpleShadow ? "on" : "off") +
             " shadow_cutscenes=" + (shadowCutscenes ? "on" : "off");
     line += " (L3+R3 > Game > Gameplay: config/quick_put_away, config/damage_multiplier, "
-            "config/master_quest_unmirrored; L3+R3 > Video: config/simple_shadow, "
-            "config/simple_shadow_cutscenes)";
+            "config/master_quest_unmirrored, config/no_n64_idle_animations; L3+R3 > Video: "
+            "config/simple_shadow, config/simple_shadow_cutscenes)";
     return line;
   }
 
@@ -50,12 +54,13 @@ public:
                 DamageMultiplier().load(std::memory_order_relaxed),
                 MasterQuestUnmirrored().load(std::memory_order_relaxed),
                 MasterQuestUnmirrorApplied().load(std::memory_order_relaxed),
+                N64IdleAnimationsEnabled().load(std::memory_order_relaxed),
                 SimpleShadowEnabled().load(std::memory_order_relaxed),
                 SimpleShadowCutscenes().load(std::memory_order_relaxed));
   }
 
 private:
-  std::optional<std::array<std::uint8_t, 6>> mLogged;
+  std::optional<std::array<std::uint8_t, 7>> mLogged;
 };
 
 } // namespace Oot3dNativeGame

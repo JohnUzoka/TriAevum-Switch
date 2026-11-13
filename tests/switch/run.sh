@@ -36,6 +36,7 @@ UNIT_TESTS=(
     oot3d_switch_launch_environment_tests
     oot3d_input_bench_tests
     oot3d_landing_roll_tests
+    oot3d_n64_idle_animations_tests
     oot3d_damage_multiplier_tests
     oot3d_quick_put_away_tests
     oot3d_master_quest_mirror_tests

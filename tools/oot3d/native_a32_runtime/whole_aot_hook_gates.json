@@ -375,6 +375,7 @@
     "0x00484944",
     "0x004849B0",
     "0x00490D60",
+    "0x004BA8CC",
     "0x004BC080",
     "0x004BF6D8",
     "0x004C1044"
@@ -1523,6 +1524,9 @@
     ],
     "0x00490D60": [
       "extended_diagnostics"
+    ],
+    "0x004BA8CC": [
+      "gameplay_options"
     ],
     "0x004BC080": [
       "base"

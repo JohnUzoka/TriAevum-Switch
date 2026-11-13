@@ -3,6 +3,7 @@
 #include "oot3d_damage_multiplier.h"
 #include "oot3d_landing_roll.h"
 #include "oot3d_master_quest_mirror.h"
+#include "oot3d_n64_idle_animations.h"
 #include "oot3d_quick_put_away.h"
 
 namespace Oot3dA32Window {
@@ -550,6 +551,18 @@ void ApplyNativeWidescreenProjectionPolicy(
       Oot3dNativeGame::Oot3dWholeAotExitAt(Oot3dNativeGame::kLandingRollSetupPc, state);
 #endif
     }
+  }
+  // N64 idle animations (oot3d_n64_idle_animations.h): the unarmed stretch
+  // and the shield fidget, which OoT3D swaps right after the fidget table
+  // load, leave the graph past the swap with the block's registers.
+  if (pc == Oot3dNativeGame::kN64IdleAnimationsHookPc && wholeAotExecutionActive &&
+      Oot3dNativeGame::N64IdleAnimationsEnabled().load(std::memory_order_relaxed) &&
+      Oot3dNativeGame::RestoreN64IdleFidget(memory, state.r)) {
+#if defined(OOT3D_NATIVE_DIRECT_AOT_PLUGIN)
+    Oot3dNativeGame::Oot3dWholeAotPluginObservableExit(Oot3dNativeGame::kN64IdleAnimationsResumePc, state);
+#else
+    Oot3dNativeGame::Oot3dWholeAotExitAt(Oot3dNativeGame::kN64IdleAnimationsResumePc, state);
+#endif
   }
   // Roll dash (oot3d_roll_dash_runtime.h): a hook that issues a native call
   // or redirects its block leaves the compiled graph at the target with the

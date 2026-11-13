@@ -2,6 +2,7 @@
 #include "oot3d_damage_multiplier.h"
 #include "oot3d_landing_roll.h"
 #include "oot3d_master_quest_mirror.h"
+#include "oot3d_n64_idle_animations.h"
 #include "oot3d_quick_put_away.h"
 #include "oot3d_roll_dash.h"
 #include "oot3d_romfs_mods.h"
@@ -13,6 +14,7 @@ public:
   explicit GameplaySettingsPanel(std::filesystem::path config)
       : mConfig(std::move(config)), mDashAnimations(RollDashAnimationsInstalled(mConfig)) {
     LandingRollEnabled().store(ReadLandingRollEnabled(mConfig), std::memory_order_relaxed);
+    N64IdleAnimationsEnabled().store(ReadN64IdleAnimationsEnabled(mConfig), std::memory_order_relaxed);
     RollDashEnabled().store(ReadRollDashEnabled(mConfig), std::memory_order_relaxed);
     QuickPutAwayEnabled().store(ReadQuickPutAwayEnabled(mConfig), std::memory_order_relaxed);
     DamageMultiplier().store(ReadDamageMultiplier(mConfig), std::memory_order_relaxed);
@@ -33,6 +35,16 @@ public:
                        "80 to 800 units rolls with no fall damage, as on N64.");
     if (mError)
       ImGui::TextWrapped("Could not write config/%s.", kLandingRollOffConfigName);
+    ImGui::Separator();
+    bool idle = N64IdleAnimationsEnabled().load(std::memory_order_relaxed);
+    if (ImGui::Checkbox("N64 idle animations", &idle)) {
+      N64IdleAnimationsEnabled().store(idle, std::memory_order_relaxed);
+      mIdleError = !SaveN64IdleAnimationsEnabled(mConfig, idle);
+    }
+    ImGui::TextWrapped("Standing still, Link stretches (unarmed) and adjusts his shield again, as on "
+                       "N64; OoT3D plays the tunic and sword fidgets in their place.");
+    if (mIdleError)
+      ImGui::TextWrapped("Could not write config/%s.", kN64IdleAnimationsOffConfigName);
     ImGui::Separator();
     bool dash = RollDashEnabled().load(std::memory_order_relaxed);
     if (ImGui::Checkbox("Roll dash", &dash)) {
@@ -109,6 +121,7 @@ private:
   std::filesystem::path mConfig;
   bool mDashAnimations = false;
   bool mError = false;
+  bool mIdleError = false;
   bool mDashError = false;
   bool mPutAwayError = false;
   bool mDamageError = false;

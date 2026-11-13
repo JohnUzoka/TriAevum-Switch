@@ -128,6 +128,14 @@ add_executable(oot3d_landing_roll_tests EXCLUDE_FROM_ALL
 target_compile_features(oot3d_landing_roll_tests PRIVATE cxx_std_20)
 oot3d_target_defaults(oot3d_landing_roll_tests NO_WARNING_OVERRIDE FOLDER Tests)
 
+# N64 idle animations at Player_Action_Idle's fidget table load
+# (config/no_n64_idle_animations; header-only).
+add_executable(oot3d_n64_idle_animations_tests EXCLUDE_FROM_ALL
+    tools/oot3d/native_game_runtime/oot3d_n64_idle_animations_tests.cpp
+)
+target_compile_features(oot3d_n64_idle_animations_tests PRIVATE cxx_std_20)
+oot3d_target_defaults(oot3d_n64_idle_animations_tests NO_WARNING_OVERRIDE FOLDER Tests)
+
 # Damage taken at Health_ChangeBy (config/damage_multiplier; header-only).
 add_executable(oot3d_damage_multiplier_tests EXCLUDE_FROM_ALL
     tools/oot3d/native_game_runtime/oot3d_damage_multiplier_tests.cpp
