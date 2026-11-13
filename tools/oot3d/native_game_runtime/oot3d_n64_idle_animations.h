@@ -1,7 +1,7 @@
 #pragma once
 
 // L3+R3 > Game > Gameplay > "Idle animations" (config/idle_animations: absent =
-// OoT3D's, the default; "n64" = N64's; "mixed" = N64's or OoT3D's at even odds).
+// N64's or OoT3D's at even odds, the default; "3ds" = OoT3D's; "n64" = N64's).
 //
 // Standing still, Link plays a fidget every other idle cycle. OoT3D picks it
 // as N64 does (Player_ChooseNextIdleAnim, inlined in Player_Action_Idle at
@@ -106,11 +106,11 @@ bool RestoreN64IdleFidget(Bus &memory, std::array<std::uint32_t, 16> &r) {
 }
 
 // In the panel's order.
-enum class IdleAnimations : std::uint8_t { Original3ds = 0, N64 = 1, Mixed = 2 };
+enum class IdleAnimations : std::uint8_t { Mixed = 0, Original3ds = 1, N64 = 2 };
 
 // Read by the hook at every fidget choice, written by the panel.
 inline std::atomic<IdleAnimations> &IdleAnimationsSetting() noexcept {
-  static std::atomic<IdleAnimations> setting{IdleAnimations::Original3ds};
+  static std::atomic<IdleAnimations> setting{IdleAnimations::Mixed};
   return setting;
 }
 
@@ -141,16 +141,16 @@ inline constexpr const char *kIdleAnimationsConfigName = "idle_animations";
 inline IdleAnimations ReadIdleAnimations(const std::filesystem::path &config) {
   std::ifstream file(config / kIdleAnimationsConfigName);
   std::string word;
-  if (!(file >> word)) return IdleAnimations::Original3ds;
+  if (!(file >> word)) return IdleAnimations::Mixed;
+  if (word == "3ds") return IdleAnimations::Original3ds;
   if (word == "n64") return IdleAnimations::N64;
-  if (word == "mixed") return IdleAnimations::Mixed;
-  return IdleAnimations::Original3ds;
+  return IdleAnimations::Mixed;
 }
 
-// Removes the file (3DS) or writes the setting's name; false if that failed.
+// Removes the file (mixed) or writes the setting's name; false if that failed.
 inline bool SaveIdleAnimations(const std::filesystem::path &config, IdleAnimations setting) {
   std::error_code error;
-  if (setting == IdleAnimations::Original3ds) {
+  if (setting == IdleAnimations::Mixed) {
     std::filesystem::remove(config / kIdleAnimationsConfigName, error);
     return !error;
   }

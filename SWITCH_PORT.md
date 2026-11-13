@@ -1078,7 +1078,7 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Fix:** the 21 texts of `logs/deko3d_shaders/` went to `shaders/console-missing/` (86 files); uam compiles
   all of them, no scratch. The release build adds them and their lighting variants to the pack.
 
-### Idle animations: L3+R3 > Game > Gameplay (`config/idle_animations`, user 11/13, 3DS by default)
+### Idle animations: L3+R3 > Game > Gameplay (`config/idle_animations`, user 11/13, N64 and 3DS at random by default)
 - **Request:** "bring back the old unused N64 idle animation". TCRF (OoT3D/Unused Link Animations): "Link's unarmed
   stretching and shield fidget idle animations are disabled".
 - **Cause (EUR code.bin, Capstone):** `Player_Action_Idle` (`0x004BA538`) inlines N64's `Player_CheckForIdleAnim` and
@@ -1096,11 +1096,11 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   starts and dispatch entries of `fork-gen-432c798dde-674182a5-pgo` (shard 102) and are in
   `Oot3dGameplayOptionBlockPcs`. `whole_aot_hook_gates.json`: 377 PCs (one new); the release build's C++
   regeneration (`generate_whole_aot_cpp.py --sparse-block-entries`) reads it, no program regeneration needed.
-- **Option and log:** "Idle animations" under "Landing roll (N64)", applied at once: **3DS** (default, no file: the
-  swap stays; user: "3ds should be default"), **N64** (`n64`) and **N64 and 3DS, at random** (`mixed`: each choice
-  of one of the two fidgets skips the swap at even odds, from a host xorshift so the game's own random state is
-  untouched; user: "could we have N64 animations but then also random N64+3DS option?"). Game log
-  `gameplay: ... idle_animations=3ds|n64|mixed ...`.
+- **Option and log:** "Idle animations" under "Landing roll (N64)", applied at once: **N64 and 3DS, at random**
+  (default, no file: each choice of one of the two fidgets skips the swap at even odds, from a host xorshift so the
+  game's own random state is untouched; user: "could we have N64 animations but then also random N64+3DS option?",
+  then "n64+3ds should be default"), **3DS** (`3ds`: the swap stays) and **N64** (`n64`: always skipped). Game log
+  `gameplay: ... idle_animations=mixed|3ds|n64 ...`.
   Cost: one hook per fidget choice (every other idle cycle).
 - **Check [not done on the console]:** child, Link's house, stand still unarmed for ~1 minute: besides the look-around,
   tunic and foot-tap fidgets, Link stretches with the relax voice (OoT3D: the tunic instead). Same as adult in

@@ -25,7 +25,7 @@ void TestLine() {
   GameplayOptionsLog log;
   const auto start = log.Take();
   Require(Contains(start, "gameplay: quick_put_away=off damage=normal master_quest_unmirrored=off ") &&
-              Contains(start, " idle_animations=3ds simple_shadow=on shadow_cutscenes=off ") &&
+              Contains(start, " idle_animations=mixed simple_shadow=on shadow_cutscenes=off ") &&
               Contains(start, "config/idle_animations"),
           "the defaults at start");
   Require(!Contains(start, "applies at the next") && !Contains(start, "shadow_method"),
@@ -43,10 +43,10 @@ void TestLine() {
   Require(Contains(applied, "master_quest_unmirrored=on idle_animations=n64 simple_shadow=off ") &&
               !Contains(applied, "applies at the next"),
           "logged again once applied");
+  constexpr auto k3ds = IdleAnimations::Original3ds;
   Require(Contains(log.Take(true, kDamageMultiplierOneHit, true, true, IdleAnimations::Mixed, false, false),
                    " idle_animations=mixed "),
           "the idle animations mixed");
-  constexpr auto k3ds = IdleAnimations::Original3ds;
   Require(Contains(log.Take(true, kDamageMultiplierOneHit, true, true, k3ds, false, false), " idle_animations=3ds "),
           "the 3DS idle animations");
   Require(Contains(log.Take(true, kDamageMultiplierOneHit, true, true, k3ds, true, false), "simple_shadow=on "),

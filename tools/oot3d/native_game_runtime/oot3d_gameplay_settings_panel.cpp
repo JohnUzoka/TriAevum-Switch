@@ -36,15 +36,15 @@ public:
     if (mError)
       ImGui::TextWrapped("Could not write config/%s.", kLandingRollOffConfigName);
     ImGui::Separator();
-    static constexpr const char *kIdleLabels[] = {"3DS (default)", "N64", "N64 and 3DS, at random"};
+    static constexpr const char *kIdleLabels[] = {"N64 and 3DS, at random (default)", "3DS", "N64"};
     int idle = static_cast<int>(IdleAnimationsSetting().load(std::memory_order_relaxed));
     if (ImGui::Combo("Idle animations", &idle, kIdleLabels, IM_ARRAYSIZE(kIdleLabels))) {
       const auto setting = static_cast<IdleAnimations>(idle);
       IdleAnimationsSetting().store(setting, std::memory_order_relaxed);
       mIdleError = !SaveIdleAnimations(mConfig, setting);
     }
-    ImGui::TextWrapped("N64: standing still, Link stretches (unarmed) and adjusts his shield, as on N64, where "
-                       "the 3DS plays its tunic and sword fidgets. At random: either, each time.");
+    ImGui::TextWrapped("Standing still, Link can stretch (unarmed) and adjust his shield, as on N64, where the "
+                       "3DS plays its tunic and sword fidgets. At random: either one, each time.");
     if (mIdleError)
       ImGui::TextWrapped("Could not write config/%s.", kIdleAnimationsConfigName);
     ImGui::Separator();

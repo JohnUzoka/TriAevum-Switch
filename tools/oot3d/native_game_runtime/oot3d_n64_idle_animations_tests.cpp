@@ -195,7 +195,7 @@ void TestRefusals() {
 }
 
 void TestSetting() {
-  Require(IdleAnimationsSetting().load() == IdleAnimations::Original3ds, "3DS by default");
+  Require(IdleAnimationsSetting().load() == IdleAnimations::Mixed, "mixed by default");
   for (std::uint32_t coin : {0U, 1U, 0xFFFFFFFEU, 0xFFFFFFFFU}) {
     Require(UseN64IdleFidget(IdleAnimations::N64, coin), "N64: always the N64 fidget");
     Require(!UseN64IdleFidget(IdleAnimations::Original3ds, coin), "3DS: never");
@@ -220,19 +220,18 @@ void TestConfig() {
   const auto config = std::filesystem::temp_directory_path() / "oot3d_n64_idle_animations_tests";
   std::error_code ignored;
   std::filesystem::remove_all(config, ignored);
-  Require(ReadIdleAnimations(config) == IdleAnimations::Original3ds, "no file: 3DS");
-  for (auto setting : {IdleAnimations::N64, IdleAnimations::Mixed}) {
+  Require(ReadIdleAnimations(config) == IdleAnimations::Mixed, "no file: mixed");
+  for (auto setting : {IdleAnimations::Original3ds, IdleAnimations::N64}) {
     Require(SaveIdleAnimations(config, setting) && ReadIdleAnimations(config) == setting, "a choice round-trips");
     Require(std::filesystem::exists(config / "idle_animations"), "file name");
   }
-  Require(SaveIdleAnimations(config, IdleAnimations::Original3ds) &&
-              ReadIdleAnimations(config) == IdleAnimations::Original3ds &&
+  Require(SaveIdleAnimations(config, IdleAnimations::Mixed) && ReadIdleAnimations(config) == IdleAnimations::Mixed &&
               !std::filesystem::exists(config / "idle_animations"),
-          "3DS removes the file");
-  Require(SaveIdleAnimations(config, IdleAnimations::Original3ds), "3DS twice");
+          "mixed removes the file");
+  Require(SaveIdleAnimations(config, IdleAnimations::Mixed), "mixed twice");
   std::filesystem::create_directories(config);
   { std::ofstream(config / "idle_animations") << "something\n"; }
-  Require(ReadIdleAnimations(config) == IdleAnimations::Original3ds, "an unknown word: 3DS");
+  Require(ReadIdleAnimations(config) == IdleAnimations::Mixed, "an unknown word: mixed");
   std::filesystem::remove_all(config, ignored);
 }
 

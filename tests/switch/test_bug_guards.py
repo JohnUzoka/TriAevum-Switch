@@ -2863,15 +2863,15 @@ GUARDS = [
           "runtime/three_ds_recomp/include/fast/oot3d/message_button_glyphs.h",
           r'\{192U, 32U, kMessageGlyphZl\},\s+\{208U, 32U, kMessageGlyphZr\},\s+\{0U, 48U, kMessageGlyphZl\},\s+\{16U, 48U, kMessageGlyphZr\},',
           "oot3d_message_button_glyphs_tests (CheckRewrite)"),
-    # --- 11/13: idle animations, L3+R3 > Game > Gameplay (config/idle_animations: 3DS by default, n64, mixed) ---
+    # --- 11/13: idle animations, L3+R3 > Game > Gameplay (config/idle_animations: mixed by default, 3ds, n64) ---
     # OoT3D swaps waitF_typeD_20f (0x1A) for 0x1C and wait_itemC_20f (0x15) for 0x14 right after the fidget
     # table load in Player_Action_Idle (0x004BA8CC..0x004BA8F8); the hook resumes past the swap (0x004BA8FC).
-    Guard("idle animations: 3DS by default (no file; user 11/13 \"3ds should be default\"), mixed takes the coin's "
-          "bit, N64 always skips the swap",
+    Guard("idle animations: N64 and 3DS at random by default (no file; user 11/13 \"n64+3ds should be default\"), "
+          "mixed takes the coin's bit, N64 always skips the swap, 3DS never",
           "tools/oot3d/native_game_runtime/oot3d_n64_idle_animations.h",
-          r'static std::atomic<IdleAnimations> setting\{IdleAnimations::Original3ds\};.*?'
+          r'static std::atomic<IdleAnimations> setting\{IdleAnimations::Mixed\};.*?'
           r'return setting == IdleAnimations::N64 \|\| \(setting == IdleAnimations::Mixed && \(coin & 1U\) != 0U\);.*?'
-          r'if \(!\(file >> word\)\) return IdleAnimations::Original3ds;',
+          r'if \(!\(file >> word\)\) return IdleAnimations::Mixed;',
           "oot3d_n64_idle_animations_tests (TestSetting, TestConfig)"),
     Guard("N64 idle animations: the hook, resume and table addresses, and only the two swapped animations",
           "tools/oot3d/native_game_runtime/oot3d_n64_idle_animations.h",
