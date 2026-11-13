@@ -249,6 +249,68 @@ void TestScene() {
   Require(Fast::Oot3d::PlayerShadowTranslucentFloorOf(frame->Scene).has_value(), "whose marble is translucent");
 }
 
+// 0.2.5-test.4/5 (user, Zora's Fountain): the shadow ended at a floe's edge
+// over the water. The game keeps the water box's surface under Link
+// (+0x88 above him, -32000 none; +0x8C the surface); the frame carries it
+// with the box's extent.
+void PutWaterBox(FakeMemory &memory, std::uint32_t box, std::int16_t x, std::int16_t surface, std::int16_t z,
+                 std::int16_t xLength, std::int16_t zLength, std::uint32_t room) {
+  memory.Put16(box, static_cast<std::uint16_t>(x));
+  memory.Put16(box + 2U, static_cast<std::uint16_t>(surface));
+  memory.Put16(box + 4U, static_cast<std::uint16_t>(z));
+  memory.Put16(box + 6U, static_cast<std::uint16_t>(xLength));
+  memory.Put16(box + 8U, static_cast<std::uint16_t>(zLength));
+  memory.Put32(box + 12U, room << 13U);
+}
+
+void TestWater() {
+  auto dry = Standing();
+  Require(dry.WaterDistance == kSimpleShadowNoWater && !DecideSimpleShadow(dry, false)->Water,
+          "no water box under him: no water");
+  auto onFloe = Standing();
+  onFloe.WaterDistance = -12.0F;
+  onFloe.WaterSurface = 8.0F;
+  const auto decided = DecideSimpleShadow(onFloe, false);
+  Require(decided && decided->Water && decided->Water->Height == 8.0F &&
+              decided->Water->Opacity == Fast::Oot3d::kPlayerShadowWaterOpacity && decided->Water->X[0] < -1.0e30F,
+          "the water 12 under him, at half the shadow's opacity, its extent not known yet");
+
+  constexpr std::uint32_t kPlay = 0x08001000U;
+  constexpr std::uint32_t kHeader = 0x08700000U;
+  constexpr std::uint32_t kBoxes = 0x08700100U;
+  FakeMemory memory;
+  PutLink(memory, Standing());
+  memory.PutFloat(kLink + kSimpleShadowWaterDistanceOffset, -12.0F);
+  memory.PutFloat(kLink + kSimpleShadowWaterSurfaceOffset, 8.0F);
+  const auto read = ReadSimpleShadowActor(memory, kLink);
+  Require(read && read->WaterDistance == -12.0F && read->WaterSurface == 8.0F, "+0x88 and +0x8C read");
+  memory.Put32(kNativeGameStatePointer, kPlay);
+  memory.Put8(kPlay + kNativeGameStateTypeOffset, kNativeGameStatePlay);
+  memory.Put8(kPlay + kNativePlayRoomOffset, 1U);
+  memory.Put32(kPlay + kSimpleShadowPlayCollisionOffset, kHeader);
+  memory.Put16(kHeader + kSimpleShadowWaterBoxCountOffset, 3U);
+  memory.Put32(kHeader + kSimpleShadowWaterBoxesOffset, kBoxes);
+  // Link at x 100, z -50 (Standing): another room's box, a box beside him,
+  // then his room's.
+  PutWaterBox(memory, kBoxes, -500, 30, -500, 1000, 1000, 2U);
+  PutWaterBox(memory, kBoxes + 16U, 200, 8, -500, 300, 1000, 63U);
+  PutWaterBox(memory, kBoxes + 32U, 0, 8, -100, 400, 200, 1U);
+  const auto box = ReadSimpleShadowWaterBox(memory, 100.0F, -50.0F, 8.0F);
+  Require(box && (*box)[0] == 0.0F && (*box)[1] == 400.0F && (*box)[2] == -100.0F && (*box)[3] == 100.0F,
+          "the first box of his room holding him, as WaterBox_GetSurface takes it");
+  Require(!ReadSimpleShadowWaterBox(memory, 100.0F, -50.0F, 9.0F).has_value(),
+          "a box at another surface is not the one the game read: no extent");
+  SimpleShadowRuntime runtime;
+  oot3d::recomp::a32::GuestState state;
+  state.r[0] = kLink;
+  state.r[14] = kCaller;
+  (void)runtime.Execute(state, memory, true, true, false);
+  const auto frame = runtime.FrameForPublish();
+  Require(frame && frame->Water && frame->Water->Height == 8.0F && frame->Water->X[0] == 0.0F &&
+              frame->Water->X[1] == 400.0F && frame->Water->Z[0] == -100.0F && frame->Water->Z[1] == 100.0F,
+          "the frame carries the water and its box");
+}
+
 void TestConfig() {
   Require(SimpleShadowEnabled().load() && !SimpleShadowCutscenes().load(),
           "the shadow on by default, in cutscenes off");
@@ -281,6 +343,7 @@ int main() {
   TestRead();
   TestHook();
   TestScene();
+  TestWater();
   TestConfig();
   std::puts("oot3d_simple_shadow_tests: ok");
   return 0;

@@ -81,6 +81,25 @@ void TestLightDirection() {
   Require(Near(clamped[1], kPlayerShadowMinimumElevation) && clamped[0] > 0.0F, "a grazing light is raised");
   const auto twoLights = Lights({{{1.0F, 1.0F, 0.0F}, 1.0F}, {{-1.0F, 1.0F, 0.0F}, 1.0F}});
   Require(Near(PlayerShadowLightDirection(&twoLights, up, 0.0F), up), "opposed lights of one energy");
+
+  // 0.2.5-test.5 (user, Temple of Time: "my shadow warps" by the side walls).
+  // Light setting 13 (the aisle between the pillars): white from -x at 45
+  // degrees and a dim blue from below; 14 (by the wall): the white one black.
+  const auto toward = [](float x, float y, float z) {
+    const float length = std::sqrt(x * x + y * y + z * z);
+    return Vec3{x / length, y / length, z / length};
+  };
+  const auto pillars = Lights({{toward(-72.0F, 72.0F, 0.0F), 1.0F}, {toward(72.0F, -72.0F, 0.0F), 0.0218F}});
+  const auto wall = Lights({{toward(72.0F, -72.0F, 0.0F), 0.214F}});
+  const auto betweenPillars = PlayerShadowLightDirection(&pillars, up, 0.0F);
+  const auto byWall = PlayerShadowLightDirection(&wall, up, 0.0F);
+  Require(Near(betweenPillars, toward(-1.0F, 1.0F, 0.0F), 1.0e-3F), "the aisle between the pillars: its window light");
+  Require(Near(byWall, up), "by the wall: a scene light from below the floor casts no shadow, straight down");
+  auto sky = wall;
+  sky.Lights[0].SkyLight = true;
+  const auto sunset = PlayerShadowLightDirection(&sky, up, 0.0F);
+  Require(sunset[0] > 0.9F && Near(sunset[1], kPlayerShadowMinimumElevation),
+          "the sky's light below the horizon keeps its own rule (raised to the minimum)");
 }
 
 // logs41: the shadow jumped when the time of day changed its light.
@@ -231,6 +250,37 @@ void TestDecal() {
           "decal: outside the floor's box, the scene's point (past a ledge: none)");
   Require(!PlayerShadowDecalReceiverAt(*decal, shown[0], shown[1], 1.0F).has_value(),
           "decal: nothing drawn (depth 1) and no floor: nothing");
+
+  // 0.2.5-test.4/5 (user, Zora's Fountain): the shadow ended at a floe's edge;
+  // the water is drawn without depth too. The water under him is the floor,
+  // at half the shadow's opacity.
+  PlayerShadowFrame floe = frame;
+  floe.Water = PlayerShadowTranslucentFloor{-10.0F, {-100.0F, 100.0F}, {-100.0F, 100.0F}, kPlayerShadowWaterOpacity};
+  const auto lake = PlayerShadowDecalOf(floe, *region, light, worldToClip);
+  Require(lake && lake->Floor && lake->Floor->Height == -10.0F && lake->Floor->Opacity == kPlayerShadowWaterOpacity,
+          "decal: the water under him, 10 below his floe");
+  const Vec3 water{-30.0F, -10.0F, -10.0F};
+  Vec3 bed{};
+  for (size_t axis = 0; axis < 3U; ++axis) bed[axis] = lake->Eye[axis] + (water[axis] - lake->Eye[axis]) * 8.0F;
+  const auto onWater = PlayerShadowDecalReceiverAt(*lake, pixel(bed)[0], pixel(bed)[1], pixel(bed)[2]);
+  Require(onWater && onWater->OnFloor && Near(onWater->Point, water, 1.0e-2F),
+          "decal: past the floe's edge, the water's point, not the lake bed's");
+  const auto wet = PlayerShadowDecalLookup(*lake, onWater->Point, up, true);
+  const auto dry = PlayerShadowDecalLookup(*lake, onWater->Point, up);
+  Require(wet && dry && Near(wet->Strength, dry->Strength * kPlayerShadowWaterOpacity),
+          "decal: on the water at half the shadow's opacity");
+  PlayerShadowFrame wading = frame;
+  wading.Water = PlayerShadowTranslucentFloor{20.0F, {-100.0F, 100.0F}, {-100.0F, 100.0F}, kPlayerShadowWaterOpacity};
+  const auto river = PlayerShadowDecalOf(wading, *region, light, worldToClip);
+  Require(river && !river->Floor, "decal: water above the camera (y 1.3 here) is not looked down on");
+  const Vec3 legs{-5.0F, 20.0F, 3.0F};
+  Require(!PlayerShadowDecalLookup(*lake, legs, up).has_value() && PlayerShadowDecalLookup(*lake, legs, up, true),
+          "decal: in his cylinder a scene point is his body; the water's point around his legs is not");
+  PlayerShadowFrame templeWater = temple;
+  templeWater.Water = floe.Water;
+  const auto both = PlayerShadowDecalOf(templeWater, *region, light, worldToClip);
+  Require(both && both->Floor && both->Floor->Height == -40.0F && both->Floor->Opacity == 1.0F,
+          "decal: the scene's floor first, at the shadow's opacity");
 }
 
 void TestProjection() {

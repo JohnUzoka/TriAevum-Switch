@@ -7,9 +7,9 @@
 // only within the region's height range, not between Link and the light, not
 // Link himself, unless it is the floor drawn a little above the ground under
 // him. One bilinear tap of the silhouette gives the edge. Where the pixel's
-// ray crosses the scene's translucent floor (drawn without depth, the Temple
-// of Time's marble) before its point, the floor is the receiver
-// (PlayerShadowDecalReceiverAt).
+// ray crosses the scene's translucent floor (drawn without depth: the Temple
+// of Time's marble, the water under Link) before its point, the floor is the
+// receiver (PlayerShadowDecalReceiverAt), at its opacity.
 layout(std140, binding = 0) uniform PlayerShadowDecal {
     mat4 clip_to_world;  // world = clip_to_world * (ndc x, ndc y, -depth, 1), then / w
     vec4 viewport;       // x, y, width, height of Link's draws (target pixels)
@@ -21,7 +21,7 @@ layout(std140, binding = 0) uniform PlayerShadowDecal {
     vec4 extent;         // x: 1 / along length, y: 1 / across length, z: lowest height, w: highest
     vec4 link;           // xyz: Link's position; w: his radius
     vec4 middle;         // xyz: his middle; w: his height
-    vec4 shade;          // x: opacity, y: unused, z: the fade's length, w: the raised floor's height
+    vec4 shade;          // x: opacity, y: the translucent floor's opacity, z: the fade's length, w: the raised floor's height
     vec4 eye;            // xyz: the camera; w: the translucent floor's height (none: lowest float)
     vec4 floor_box;      // the translucent floor's lowest x, highest x, lowest z, highest z
 };
@@ -33,18 +33,16 @@ layout(location = 0) out vec4 shadow_out_color;
 // PlayerShadowDecalRaisedFloor with PlayerShadowDecalFacing: within Link's
 // cylinder, a receiver up to shade.w above his position whose surface (from
 // the next pixels' world points, their depths along the scene depth's
-// derivatives; up on the translucent floor) faces along the floor normal is
-// the floor drawn above the ground under him, not his body. Only pixels in
-// the cylinder pay for it.
+// derivatives) faces along the floor normal is the floor drawn above the
+// ground under him, not his body; so is the translucent floor's point at any
+// height (water around his legs). Only pixels in the cylinder pay for it.
 bool raised_floor(vec3 p, float up, bool on_floor, vec2 ndc, float depth, float depth_dx, float depth_dy) {
+    if (on_floor) return true;
     if (up <= 1.0 || up >= shade.w) return false;
-    vec3 facing = vec3(0.0, 1.0, 0.0);
-    if (!on_floor) {
-        vec2 step = vec2(2.0 / viewport.z, (origin.w > 0.5 ? 2.0 : -2.0) / viewport.w);
-        vec4 next_across = clip_to_world * vec4(ndc.x + step.x, ndc.y, -(depth + depth_dx), 1.0);
-        vec4 next_down = clip_to_world * vec4(ndc.x, ndc.y + step.y, -(depth + depth_dy), 1.0);
-        facing = cross(next_across.xyz / next_across.w - p, next_down.xyz / next_down.w - p);
-    }
+    vec2 step = vec2(2.0 / viewport.z, (origin.w > 0.5 ? 2.0 : -2.0) / viewport.w);
+    vec4 next_across = clip_to_world * vec4(ndc.x + step.x, ndc.y, -(depth + depth_dx), 1.0);
+    vec4 next_down = clip_to_world * vec4(ndc.x, ndc.y + step.y, -(depth + depth_dy), 1.0);
+    vec3 facing = cross(next_across.xyz / next_across.w - p, next_down.xyz / next_down.w - p);
     float facing_along = dot(facing, normal.xyz);
     float facing_length = dot(facing, facing);
     return facing_length > 0.0 && facing_along * facing_along >= toward_light.w * toward_light.w * facing_length;
@@ -95,5 +93,5 @@ void main() {
     float cover = texture(silhouette, uv).r;
     if (cover <= 0.0) discard;
     float fade = clamp(min(height - extent.z, extent.w - height) / shade.z, 0.0, 1.0);
-    shadow_out_color = vec4(0.0, 0.0, 0.0, shade.x * cover * fade);
+    shadow_out_color = vec4(0.0, 0.0, 0.0, shade.x * cover * fade * (on_floor ? shade.y : 1.0));
 }

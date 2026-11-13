@@ -31,6 +31,18 @@
 
 namespace Fast::Oot3d {
 
+// A floor the game draws translucent without writing depth (a Temple of Time
+// marble, a water surface): the decal's receiver where a pixel's ray crosses
+// it inside its box before the scene's point (PlayerShadowDecalReceiverAt).
+struct PlayerShadowTranslucentFloor {
+    float Height = 0.0F;      // world y
+    std::array<float, 2> X{}; // lowest, highest
+    std::array<float, 2> Z{};
+    float Opacity = 1.0F;     // of the shadow on it, against the shadow's own
+
+    bool operator==(const PlayerShadowTranslucentFloor&) const = default;
+};
+
 struct PlayerShadowFrame {
     // Link's actor; his draws carry (actor id 0 << 32) | address as their
     // NativeActorIdentity.
@@ -45,6 +57,9 @@ struct PlayerShadowFrame {
     // The game's scene (PlayState +0x104), -1 unknown: its translucent floor
     // (PlayerShadowTranslucentFloorOf).
     int16_t Scene = -1;
+    // The water surface under him (actor waterSurfaceY, in the game's water
+    // box there), when there is one (PlayerShadowWaterOpacity).
+    std::optional<PlayerShadowTranslucentFloor> Water;
 
     bool operator==(const PlayerShadowFrame&) const = default;
 };
@@ -217,6 +232,14 @@ struct PlayerShadowSceneLight {
             const float weight = Renderer3ds::PicaSceneDirectionalEnergy(light);
             const auto direction = Renderer3ds::PicaSceneDirectionalDirection(light);
             if (!direction || !(weight >= kPlayerShadowLightFloor)) continue;
+            // A scene's light from below the floor's horizon (not the sky's:
+            // it keeps its own) lights from under the floor and casts no
+            // shadow on it (PicaSceneShadowCandidateEnergy's rule). The Temple
+            // of Time's aisles by the side walls (light settings 14 and 16)
+            // have only such a light: clamped up to the minimum elevation it
+            // threw a long shadow toward the wall, the other way from the
+            // next aisle's (user, 0.2.5-test.5, "my shadow warps").
+            if (!light.SkyLight && Dot(*direction, up) <= 0.0F) continue;
             for (size_t axis = 0; axis < 3U; ++axis) sum[axis] += weight * (*direction)[axis];
             strongest = std::max(strongest, weight);
         }
@@ -537,11 +560,14 @@ inline constexpr float kPlayerShadowDecalAbove = 70.0F;
 // from the camera above crosses such a floor (its box, world x and z) before
 // the scene's point, more than kPlayerShadowDecalFloorGap under it, the floor
 // is the receiver. Nothing else in those boxes is drawn under the floor.
-struct PlayerShadowTranslucentFloor {
-    float Height = 0.0F;      // world y
-    std::array<float, 2> X{}; // lowest, highest
-    std::array<float, 2> Z{};
-};
+//
+// Water: its surface too is drawn translucent without depth (Zora's Fountain:
+// Link's shadow ended at a floe's edge, the rest of it over the water, user
+// 0.2.5-test.4/5). The game keeps the surface of the water box under an actor
+// (Actor_UpdateBgCheckInfo, EUR 0x003766EC: +0x88 its height above him, -32000
+// with no box; +0x8C the surface); the game side publishes it with the box
+// (PlayerShadowFrame::Water). A shadow on water is lighter than on the ground.
+inline constexpr float kPlayerShadowWaterOpacity = 0.5F;
 inline constexpr float kPlayerShadowDecalFloorGap = 1.0F;
 [[nodiscard]] inline std::optional<PlayerShadowTranslucentFloor> PlayerShadowTranslucentFloorOf(int16_t scene) noexcept {
     switch (scene) {
@@ -569,7 +595,8 @@ struct PlayerShadowDecal {
     float Highest = kPlayerShadowDecalAbove;
     std::array<float, 3> Link{};   // his position
     std::array<float, 3> Middle{}; // the side of him the light comes from is not his shadow
-    // The scene's translucent floor, when the camera (Eye) is above it.
+    // The scene's translucent floor or the water under him, when the camera
+    // (Eye) is above it.
     std::optional<PlayerShadowTranslucentFloor> Floor;
     std::array<float, 3> Eye{};
 };
@@ -595,9 +622,12 @@ struct PlayerShadowDecal {
     for (size_t axis = 0; axis < 3U; ++axis)
         decal.Middle[axis] = decal.Link[axis] + decal.Normal[axis] * kPlayerShadowDecalLinkMiddle;
     // The camera: the point whose clip has x, y and w at 0 (the third column
-    // of ClipToWorld). Its floor only when it looks down on it.
+    // of ClipToWorld). The scene's floor, else the water under him, only when
+    // it looks down on it.
     const auto& m = decal.ClipToWorld;
-    if (const auto floor = PlayerShadowTranslucentFloorOf(frame.Scene); floor && std::abs(m[14]) > 1.0e-6F) {
+    auto floor = PlayerShadowTranslucentFloorOf(frame.Scene);
+    if (!floor) floor = frame.Water;
+    if (floor && std::abs(m[14]) > 1.0e-6F) {
         decal.Eye = {m[2] / m[14], m[6] / m[14], m[10] / m[14]};
         if (Finite(decal.Eye) && decal.Eye[1] > floor->Height) decal.Floor = floor;
     }
@@ -660,9 +690,10 @@ struct PlayerShadowDecalReceiver {
 
 // Where a scene point falls in the silhouette (u along, v across, 0..1 in
 // the region, before the floor quad's row flip) and how strongly (the fade at
-// the height range's ends), or nothing when it takes no shadow. `facing`: the
-// point's surface normal, any length or sign (PlayerShadowDecalFacing); zero
-// or not finite is not a floor.
+// the height range's ends, the translucent floor's opacity), or nothing when
+// it takes no shadow. `facing`: the point's surface normal, any length or sign
+// (PlayerShadowDecalFacing); zero or not finite is not a floor. `onFloor`: the
+// translucent floor's point (PlayerShadowDecalReceiver), never his body.
 struct PlayerShadowDecalHit {
     std::array<float, 2> Uv{};
     float Strength = 1.0F;
@@ -677,7 +708,8 @@ struct PlayerShadowDecalHit {
            along * along >= kPlayerShadowDecalFloorFacing * kPlayerShadowDecalFloorFacing * length;
 }
 [[nodiscard]] inline std::optional<PlayerShadowDecalHit> PlayerShadowDecalLookup(
-    const PlayerShadowDecal& decal, const std::array<float, 3>& point, const std::array<float, 3>& facing) noexcept {
+    const PlayerShadowDecal& decal, const std::array<float, 3>& point, const std::array<float, 3>& facing,
+    bool onFloor = false) noexcept {
     using namespace PlayerShadowDetail;
     const Vec3 relative{point[0] - decal.Origin[0], point[1] - decal.Origin[1], point[2] - decal.Origin[2]};
     const float height = Dot(relative, decal.Normal);
@@ -688,8 +720,8 @@ struct PlayerShadowDecalHit {
     const float up = Dot(fromLink, decal.Normal);
     const Vec3 sideways{fromLink[0] - up * decal.Normal[0], fromLink[1] - up * decal.Normal[1],
                         fromLink[2] - up * decal.Normal[2]};
-    if (Dot(sideways, sideways) < kPlayerShadowDecalLinkRadius * kPlayerShadowDecalLinkRadius && up > 1.0F &&
-        up < kPlayerShadowDecalLinkTall && !PlayerShadowDecalRaisedFloor(decal.Normal, facing, up))
+    if (!onFloor && Dot(sideways, sideways) < kPlayerShadowDecalLinkRadius * kPlayerShadowDecalLinkRadius &&
+        up > 1.0F && up < kPlayerShadowDecalLinkTall && !PlayerShadowDecalRaisedFloor(decal.Normal, facing, up))
         return std::nullopt; // Link himself
     const float along = height / decal.Rise;
     const Vec3 flat{relative[0] - decal.TowardLight[0] * along, relative[1] - decal.TowardLight[1] * along,
@@ -699,7 +731,8 @@ struct PlayerShadowDecalHit {
               (Dot(flat, decal.Across) - decal.AcrossRange[0]) / (decal.AcrossRange[1] - decal.AcrossRange[0])};
     if (!(hit.Uv[0] >= 0.0F && hit.Uv[0] <= 1.0F && hit.Uv[1] >= 0.0F && hit.Uv[1] <= 1.0F)) return std::nullopt;
     hit.Strength = std::clamp(std::min(height - decal.Lowest, decal.Highest - height) / kPlayerShadowDecalFade, 0.0F,
-                              1.0F);
+                              1.0F) *
+                   (onFloor && decal.Floor ? decal.Floor->Opacity : 1.0F);
     return hit;
 }
 

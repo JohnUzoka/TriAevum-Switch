@@ -2997,6 +2997,40 @@ GUARDS = [
     Guard("0.2.5-test.5 ripples: perf.txt interp: block writes the quad batch rejections per window",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
           r'" quad_reject_corners=".*?" quad_reject_unreadable=".*?totals\.QuadRejectUnreadable \+= quads\.RejectedUnreadable;'),
+    Guard("0.2.5-test.5 (user): in the Temple of Time the shadow 'warps' by the side walls: the aisle there has "
+          "only a scene light from below the floor (light setting 14/16), clamped up it threw a long shadow toward "
+          "the wall; a scene light below the horizon casts none (sky lights keep their rule)",
+          "runtime/three_ds_recomp/include/fast/oot3d/player_shadow.h",
+          r'if \(!direction \|\| !\(weight >= kPlayerShadowLightFloor\)\) continue;.*?'
+          r'if \(!light\.SkyLight && Dot\(\*direction, up\) <= 0\.0F\) continue;\s+'
+          r'for \(size_t axis = 0; axis < 3U; \+\+axis\) sum\[axis\] \+= weight \* \(\*direction\)\[axis\];',
+          "oot3d_player_shadow_tests (TestLightDirection)"),
+    Guard("0.2.5-test.4/5 (user, Zora's Fountain): the shadow ended at a floe's edge over the water: the water "
+          "under Link is the decal's translucent floor (after the scene's), at its opacity, never his body",
+          "runtime/three_ds_recomp/include/fast/oot3d/player_shadow.h",
+          r'auto floor = PlayerShadowTranslucentFloorOf\(frame\.Scene\);\s+if \(!floor\) floor = frame\.Water;.*?'
+          r'if \(!onFloor && Dot\(sideways, sideways\) < kPlayerShadowDecalLinkRadius.*?'
+          r'\(onFloor && decal\.Floor \? decal\.Floor->Opacity : 1\.0F\);',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("the decal's shader: the translucent floor's points are never his body and take the floor's opacity",
+          "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
+          r'bool raised_floor\(vec3 p, float up, bool on_floor, vec2 ndc, float depth, float depth_dx, float depth_dy\) \{\s+'
+          r'if \(on_floor\) return true;.*?'
+          r'shadow_out_color = vec4\(0\.0, 0\.0, 0\.0, shade\.x \* cover \* fade \* \(on_floor \? shade\.y : 1\.0\)\);',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("the decal's uniforms: the translucent floor's opacity (water 0.5, marble 1)",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
+          r'block\.Shade\[1\] = decal->Floor \? decal->Floor->Opacity : 1\.0F;',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("the water under Link: +0x88 yDistToWater (-32000 none) and +0x8C waterSurfaceY, narrowed to the game's "
+          "own water box (PlayState +0xA98 collision header, the first box of his room at that surface)",
+          "tools/oot3d/native_game_runtime/oot3d_simple_shadow.h",
+          r'kSimpleShadowWaterDistanceOffset = 0x0088U;.*?kSimpleShadowWaterSurfaceOffset = 0x008CU;.*?'
+          r'kSimpleShadowPlayCollisionOffset = 0x0A98U;.*?'
+          r'if \(actor\.WaterDistance > kSimpleShadowNoWater && std::isfinite\(actor\.WaterSurface\)\).*?'
+          r'if \(value\(1\) != surface\) return std::nullopt;.*?'
+          r'if \(frame && frame->Water\)\s+if \(const auto box =\s+ReadSimpleShadowWaterBox\(',
+          "oot3d_simple_shadow_tests (TestWater)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

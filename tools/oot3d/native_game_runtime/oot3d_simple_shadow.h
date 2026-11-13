@@ -24,6 +24,7 @@
 #include "oot3d_native_area.h"
 #include "recomp/a32_runtime.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -31,6 +32,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -60,6 +62,23 @@ inline constexpr float kSimpleShadowLowest = -50.0F;
 inline constexpr float kSimpleShadowHighest = 1500.0F;
 // Completed frames one decision of the hook serves (SimpleShadowRuntime::FrameForPublish).
 inline constexpr std::uint32_t kSimpleShadowFrameLifetime = 2U;
+// The water under an actor, as Actor_UpdateBgCheckInfo (EUR 0x003766EC, and
+// 0x00316040 for the player) keeps it: the first water box of the scene's
+// collision that holds the actor's x and z (WaterBox_GetSurface 0x0033EEB8)
+// gives +0x88 its surface's height above him and +0x8C the surface; without a
+// box +0x88 is -32000 (BGCHECK_Y_MIN) and +0x8C 0.
+inline constexpr std::uint32_t kSimpleShadowWaterDistanceOffset = 0x0088U; // yDistToWater (f32)
+inline constexpr std::uint32_t kSimpleShadowWaterSurfaceOffset = 0x008CU;  // waterSurfaceY (f32)
+inline constexpr float kSimpleShadowNoWater = -32000.0F;
+// The box's extent, as WaterBox_GetSurface finds it: PlayState +0xA98 the
+// CollisionContext, whose first word is the CollisionHeader; its u16 +0x14 the
+// water box count, +0x28 the boxes (16 bytes: s16 x, y surface, z, x length,
+// z length; u32 +0x0C properties, room in bits 13..18 (63 any), 0x80000 off).
+inline constexpr std::uint32_t kSimpleShadowPlayCollisionOffset = 0x0A98U;
+inline constexpr std::uint32_t kSimpleShadowWaterBoxCountOffset = 0x0014U;
+inline constexpr std::uint32_t kSimpleShadowWaterBoxesOffset = 0x0028U;
+inline constexpr std::uint32_t kSimpleShadowWaterBoxSize = 0x0010U;
+inline constexpr std::uint32_t kSimpleShadowWaterBoxLimit = 64U;
 
 // Read by the hook, written by the panel.
 inline std::atomic<bool> &SimpleShadowEnabled() noexcept {
@@ -124,6 +143,8 @@ struct SimpleShadowActor final {
   std::uint32_t StateFlags1 = 0U;
   std::uint32_t StateFlags2 = 0U;
   std::array<std::int16_t, 3> FloorNormal{};
+  float WaterDistance = kSimpleShadowNoWater; // the water surface above him, kSimpleShadowNoWater none
+  float WaterSurface = 0.0F;
 };
 
 // The mod's conditions, and none in cutscenes (kSimpleShadowCutscene) unless `cutscenes`
@@ -149,6 +170,12 @@ inline std::optional<Fast::Oot3d::PlayerShadowFrame> DecideSimpleShadow(const Si
   frame.FloorNormal = {normal[0] / length, normal[1] / length, normal[2] / length};
   frame.Height = height;
   frame.Opacity = Fast::Oot3d::PlayerShadowOpacity(actor.ShadowAlpha, height);
+  // The water under him, its extent unknown here (ReadSimpleShadowWaterBox).
+  if (actor.WaterDistance > kSimpleShadowNoWater && std::isfinite(actor.WaterSurface)) {
+    constexpr float far = std::numeric_limits<float>::max();
+    frame.Water = Fast::Oot3d::PlayerShadowTranslucentFloor{
+        actor.WaterSurface, {-far, far}, {-far, far}, Fast::Oot3d::kPlayerShadowWaterOpacity};
+  }
   return frame;
 }
 
@@ -171,6 +198,12 @@ std::optional<SimpleShadowActor> ReadSimpleShadowActor(Memory &memory, std::uint
     return std::nullopt;
   for (std::size_t axis = 0; axis < 3U; ++axis) actor.Position[axis] = std::bit_cast<float>(position[axis]);
   actor.FloorHeight = std::bit_cast<float>(floorHeight);
+  std::uint32_t waterDistance = 0U, waterSurface = 0U;
+  if (memory.Read32(address + kSimpleShadowWaterDistanceOffset, &waterDistance) &&
+      memory.Read32(address + kSimpleShadowWaterSurfaceOffset, &waterSurface)) {
+    actor.WaterDistance = std::bit_cast<float>(waterDistance);
+    actor.WaterSurface = std::bit_cast<float>(waterSurface);
+  }
   if (actor.FloorPoly != 0U) {
     for (std::uint32_t axis = 0; axis < 3U; ++axis) {
       std::uint16_t component = 0U;
@@ -180,6 +213,46 @@ std::optional<SimpleShadowActor> ReadSimpleShadowActor(Memory &memory, std::uint
     }
   }
   return actor;
+}
+
+// The extent of the water box whose surface the game gave the actor at
+// (x, z): the first box of the current room (or of any room) holding x and z
+// at that surface, as WaterBox_GetSurface takes it; nothing when none reads
+// (Zora's Domain's own box, 0x58, is not in the list: the surface then has no
+// extent).
+template <typename Memory>
+std::optional<std::array<float, 4>> ReadSimpleShadowWaterBox(Memory &memory, float x, float z, float surface) {
+  std::uint32_t play = 0U, header = 0U, boxes = 0U;
+  std::uint8_t type = 0U, room = 0xFFU;
+  std::uint16_t count = 0U;
+  if (!memory.Read32(kNativeGameStatePointer, &play) || play == 0U ||
+      !memory.Read8(play + kNativeGameStateTypeOffset, &type) || type != kNativeGameStatePlay ||
+      !memory.Read8(play + kNativePlayRoomOffset, &room) ||
+      !memory.Read32(play + kSimpleShadowPlayCollisionOffset, &header) || header == 0U ||
+      !memory.Read16(header + kSimpleShadowWaterBoxCountOffset, &count) ||
+      !memory.Read32(header + kSimpleShadowWaterBoxesOffset, &boxes) || boxes == 0U)
+    return std::nullopt;
+  const auto signedRoom = static_cast<std::int8_t>(room);
+  for (std::uint32_t index = 0; index < std::min<std::uint32_t>(count, kSimpleShadowWaterBoxLimit); ++index) {
+    const std::uint32_t box = boxes + index * kSimpleShadowWaterBoxSize;
+    std::array<std::uint16_t, 5> fields{};
+    std::uint32_t properties = 0U;
+    bool read = memory.Read32(box + 0x0CU, &properties);
+    for (std::uint32_t field = 0; read && field < fields.size(); ++field)
+      read = memory.Read16(box + 2U * field, &fields[field]);
+    if (!read) return std::nullopt;
+    const std::uint32_t boxRoom = (properties >> 13U) & 0x3FU;
+    if ((boxRoom != 0x3FU && static_cast<std::int32_t>(boxRoom) != signedRoom) || (properties & 0x80000U) != 0U)
+      continue;
+    const auto value = [&](std::size_t field) { return static_cast<float>(static_cast<std::int16_t>(fields[field])); };
+    const float x0 = value(0), z0 = value(2), x1 = x0 + value(3), z1 = z0 + value(4);
+    if (!(x0 < x && x < x1 && z0 < z && z < z1)) continue;
+    // The game takes the first box holding x and z; another surface means
+    // this is not the one it read.
+    if (value(1) != surface) return std::nullopt;
+    return std::array<float, 4>{x0, x1, z0, z1};
+  }
+  return std::nullopt;
 }
 
 // The hook at kSimpleShadowHookPc (whole-AOT execution) and the shadow it
@@ -215,6 +288,13 @@ public:
     auto frame = DecideSimpleShadow(*actor, cutscenes);
     // The scene names its translucent floor (PlayerShadowTranslucentFloorOf).
     if (frame) frame->Scene = ReadNativeArea(memory).Scene;
+    // The water under him gets its box's extent.
+    if (frame && frame->Water)
+      if (const auto box =
+              ReadSimpleShadowWaterBox(memory, actor->Position[0], actor->Position[2], frame->Water->Height)) {
+        frame->Water->X = {(*box)[0], (*box)[1]};
+        frame->Water->Z = {(*box)[2], (*box)[3]};
+      }
     mFrameAge = 0U;
     mFrame.reset();
     if (!frame || !memory.Write8(actor->Address + kSimpleShadowAlphaOffset, 0U)) return std::nullopt;

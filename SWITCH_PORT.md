@@ -1052,6 +1052,36 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   marble beside the carpet and on the steps toward it; the courtyard outside; `shadow_decal_ms` against logs48
   (0.50-0.67 ms median in tokinoma).
 
+### Simple shadow: the Temple of Time's side aisles, and on the water (user, 0.2.5-test.5, 11/13)
+- **Seen:**
+  - "in the Temple of Time when I go to the side walls my shadow warps" (clip 2026111316421500, logs49): by
+    the walls a long shadow toward the wall, a step away a short one the other way.
+  - At Zora's Fountain (2026111314590300, 2026111316372400) "a weird thing with the shadow on the ice": it
+    ended at the floes' edges. In the air above a floe the whole shadow was past the edge. Every cut in the
+    clips is at a floe/water edge, none inside a floe top.
+- **The Temple of Time's light:** the hall's floor polygons carry light settings (SurfaceType word 1 bits
+  6..10). The game blends to the one under Link, and the shadow takes its two directional lights: the diamond
+  floor and carpet (0, 17) from above, 76 degrees; the aisles between the pillars (13, 15) the window light at 45
+  degrees; the aisles by the walls (14, 16) that light black, only a blue one from below the floor. Clamped up
+  to the minimum elevation, the light from below threw a long shadow toward the wall, the other way from the
+  next aisle's. Now a scene light below the horizon casts no shadow, as the renderer's directional shadows
+  already rule (`PicaSceneShadowCandidateEnergy`). By the walls the shadow is straight down, and it shortens
+  there without flipping. Sky lights keep their rule. [INFERENCE] 344 light-setting records in 95 scenes change
+  more than 5 degrees, all ones where a light from below counted.
+- **Water:** its surface is drawn without depth, like the marble. Under the water the scene's depth is the
+  lake bed, out of range, so the shadow stopped at a floe's edge. The game keeps the water under every actor
+  (Actor_UpdateBgCheckInfo 0x003766EC, the player's 0x00316040: +0x88 yDistToWater, -32000 without a box; +0x8C
+  waterSurfaceY). The shadow frame carries that surface, narrowed to the game's water box (the first of his
+  room holding him, PlayState +0xA98). The decal takes it as its translucent floor when the scene has none, at
+  half the shadow's opacity (user: "I like that idea"), and its points are never his body. Swimming or in the
+  air over open water, his floor is the lake bed and the surface is out of range: no shadow, as the game's foot
+  shadows. No pass added; decal DKSH 3584 B; `Shade[1]` is the translucent floor's opacity (water 0.5, marble 1).
+- **Test:** `oot3d_player_shadow_tests` (TestLightDirection, TestDecal), `oot3d_simple_shadow_tests` (TestWater).
+- **Console check:** Temple of Time: walk from the diamond floor across both aisles to each side wall; the
+  shadow stays under him by the wall and turns only between the bands. Zora's Fountain: on a floe toward its
+  edge, and a jump between floes; the shadow continues onto the water, lighter. Wade at Zora's River: a lighter
+  shadow on the surface. Swim: none.
+
 ### Water ripples blinking at 60 FPS: the game's effect quads paired by shape (user, logs48, 0.2.5-test.4, 11/13)
 - **Seen:** "the water circle textures blinking" (clips 2026111314590300, Zora's Fountain, and
   2026111315004400, Zora's River). In clip A at 10.667-10.80 s the newest ripple at Link's feet is present,
