@@ -223,6 +223,9 @@ class PicaResources {
         Renderer3ds::PicaTextureView PackView{};
         // A pack image: its PNG's size before the cap (TexturePackCapChangesImage).
         ::Oot3d::Renderer::TextureSize PackSource{};
+        // The message atlas: the L/R icons it relabels (message_button_glyphs.h),
+        // also in the pack image uploaded for it later.
+        uint8_t MessageGlyphs = 0;
     };
 
     struct LastUniforms {
@@ -242,8 +245,10 @@ class PicaResources {
     void Destroy(Texture& texture) noexcept;
     // The texture pack image (larger than the native one) under the replacement key; 0 when not now.
     // `menu`: a HUD image (kept by the pack runtime), not released after the upload.
+    // `messageGlyphs`: the message atlas's L/R icons to relabel in it (message_button_glyphs.h).
     DkResHandle UploadReplacement(const Renderer3ds::PicaTextureView& view, const PicaTextureKey& key,
-                                  const ::Oot3d::Renderer::AzaharTextureReplacement& replacement, bool menu);
+                                  const ::Oot3d::Renderer::AzaharTextureReplacement& replacement, bool menu,
+                                  uint8_t messageGlyphs);
     // Applies a texture pack change published by the Video tab (BeginFrame).
     void ApplyTexturePackSettings();
     // Takes an entry out of the cache; its memory goes in Evict once no

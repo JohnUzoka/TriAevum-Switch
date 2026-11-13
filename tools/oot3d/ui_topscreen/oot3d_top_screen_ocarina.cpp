@@ -42,6 +42,19 @@ bool ReadTopScreenOcarinaState(NativeA32Memory &memory,
       !ReadTopScreenOcarinaUiActive(memory, &suppressed)) return false;
   state->CursorSong = column < 4 && row < 3 ? column + row * 4 : 11;
   state->Active = !suppressed && state->Page != 0 && transition == 0 && mode == 3;
+  if (!state->Active) return true;
+  // The message context 0x005C1878 owns the staff of the ocarina box; its
+  // staff object (+0x44) keeps the played notes in eight slots at +0x954
+  // (stride 8, 0xFF = empty). 0x00494DE0 fills one per note played
+  // (0x002D038C, called by the message update at 0x00474270);
+  // 0x002C0CA4 empties all eight once the notes have dropped (0x00474B74)
+  // and at every ocarina start (0x0033F2D8), as does closing the box.
+  constexpr std::uint32_t kStaffNoteSlots = 0x005C1878U + 0x44U + 0x954U;
+  for (std::uint32_t slot = 0; slot < 8U && !state->StaffNotes; ++slot) {
+    std::uint32_t note = 0;
+    if (!memory.Read32(kStaffNoteSlots + slot * 8U, &note)) return false;
+    state->StaffNotes = note != 0xFFU;
+  }
   return true;
 }
 
@@ -65,7 +78,9 @@ void TopScreenOcarinaBrowser::Advance(const TopScreenOcarinaState &state,
     mRepeat = 0;
     return;
   }
-  if (!state.Active) return;
+  // While the game's staff shows played notes the menu is hidden: nothing
+  // browses or toggles out of sight.
+  if (!state.Active || state.StaffNotes) return;
   // 0x005D3D30 toggles 0x005E3E6C on D-pad Up. Unlike the song cursor,
   // this preference survives closing the instrument, until runtime reset.
   if (togglePressed) {
@@ -115,7 +130,7 @@ bool ReadTopScreenOcarinaGeometry(NativeA32Memory &memory,
   if (!ReadTopScreenOcarinaState(memory, &state)) {
     SetError(error, "cannot read native ocarina owner state"); return false;
   }
-  if (!state.Active || browser.GuideHidden()) return true;
+  if (!state.Active || state.StaffNotes || browser.GuideHidden()) return true;
   const bool localSong = state.Page == 12 && browser.SelectedSong() >= 0;
   const std::uint32_t song = localSong ? browser.SelectedSong() : state.CursorSong;
   geometry->Song = static_cast<std::uint8_t>(song);

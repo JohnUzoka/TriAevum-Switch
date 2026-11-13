@@ -232,6 +232,36 @@ void TestRules() {
   Require(ResolveTopScreenDpadItem(aiming, 2) == kBow, "another button's bow is the bow");
 }
 
+// 0.2.4 clip: the D-pad items blinked between usable and grey while Link held
+// an item. Each frame the game thread enables Y/X/I/II again and the Graph
+// thread disables them; the HUD takes the Graph thread's flags word, so both
+// moments read alike.
+void TestSettledStatuses() {
+  constexpr std::uint32_t kAllButtons = 0x00800000U | 0x01000000U | 0x04000000U | 0x02000000U;
+  auto state = Field();
+  state.Inventory[1] = kNut;
+  state.Inventory[7] = 0x07U; // Fairy Ocarina
+  state.Slots = {1U, 7U, kTopScreenDpadItemSlotNone, kTopScreenDpadItemSlotNone};
+  const auto settled = [&](std::uint8_t live, std::uint32_t flags, std::size_t direction) {
+    auto read = state;
+    read.ButtonStatus.fill(live);
+    SettleTopScreenDpadItemHudState(read, flags);
+    return ResolveTopScreenDpadItem(read, direction);
+  };
+  Require(settled(0x00U, 0U, 0) == kNut && settled(0x00U, 0U, 1) == 0x07U,
+          "nothing disabled: usable");
+  Require(settled(0x00U, kAllButtons, 0) == kTopScreenNoItem,
+          "after the game thread's enable, the Graph thread's disable still greys");
+  Require(settled(0xFFU, kAllButtons, 0) == kTopScreenNoItem,
+          "after the Graph thread's disable: grey, the same");
+  Require(settled(0x00U, kAllButtons & ~0x02000000U, 0) == kNut,
+          "Item II still enabled: not all disabled");
+  Require(settled(0xFFU, 0U, 0) == kTopScreenNoItem, "the flags never enable a status");
+  Require(settled(0x00U, 0x08000000U, 1) == kTopScreenNoItem &&
+              settled(0x00U, 0x08000000U, 0) == kNut,
+          "the touch Ocarina's state greys an Ocarina direction only");
+}
+
 void TestButtons() {
   auto state = Field();
   state.Inventory[1] = kNut;
@@ -496,6 +526,19 @@ void TestDispatch() {
                                          runtime.AdultDpadItemSlots, &usable) &&
               !usable[1] && !usable[2],
           "greyed on Epona");
+  memory.Write32(kPlayer + 0x1710U, 0U);
+  // Y/X/I/II enabled in memory (the game thread's moment), disabled in the
+  // touch screen's flags word (the Graph thread's).
+  memory.Write32(kTopScreenTouchFlags, 0x07800000U);
+  Require(ReadTopScreenDpadItemUsability(memory, runtime.ChildDpadItemSlots,
+                                         runtime.AdultDpadItemSlots, &usable) &&
+              !usable[1] && !usable[2],
+          "the HUD greys with the touch screen's disabled buttons");
+  memory.Write32(kTopScreenTouchFlags, 0U);
+  Require(ReadTopScreenDpadItemUsability(memory, runtime.ChildDpadItemSlots,
+                                         runtime.AdultDpadItemSlots, &usable) &&
+              usable[1] && usable[2],
+          "and is usable again when they are enabled");
 }
 
 } // namespace
@@ -504,6 +547,7 @@ void RunTopScreenDpadItemsTests() {
   TestConfig();
   TestSlotItems();
   TestRules();
+  TestSettledStatuses();
   TestButtons();
   TestBottles();
   TestBoomerangSlingshot();

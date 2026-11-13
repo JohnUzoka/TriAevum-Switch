@@ -1004,6 +1004,80 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Test:** `oot3d_simple_shadow_tests` (TestConfig: absent and empty = on, `off` = off, on removes the
   file), `oot3d_gameplay_options_log_tests`; guard "Simple shadow: on by default since 0.2.4 ...".
 
+### Ocarina song menu over the notes being played (user, 11/13)
+- **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we
+  should have one or the other". In the clip the menu's white preview notes and the notes the
+  player plays share the staff of the "Play with ..." box, column for column, until the played
+  notes drop.
+- **Cause:** the menu draws its notes at 122 + 24n, the columns of the game's own staff (native
+  `0x002F67D4` uses 0x52 + 24n, +40 in the port). 3.2.2 does the same: its melody draw
+  (`0x005E2D70`) and browser (`0x005D7574`) never read the game's staff, so it overlaps there too.
+- **Fix (port rule, not 3.2.2's):** the menu (bands, notes, markers, arrows, title) yields while
+  the game's staff holds a played note and returns when the game empties it. The staff belongs
+  to the message context `0x005C1878` (staff at +0x44): eight slots at +0x954, stride 8, 0xFF
+  empty. `0x00494DE0` fills one per note (`0x002D038C`, from the message update at `0x00474270`);
+  `0x002C0CA4` empties them after the notes drop (`0x00474B74`) and at every ocarina start
+  (`0x0033F2D8`), as does closing the box. `TopScreenOcarinaState::StaffNotes`; while it is set
+  the menu does not browse or toggle, and the ocarina keeps the D-pad. The other hide rules
+  (`ReadTopScreenOcarinaUiActive`, `0x005CD63C`) are unchanged. Played notes stay until eight
+  have dropped, a song is recognised or the ocarina closes, and the menu stays hidden that long.
+- **Test:** `oot3d_top_screen_mod_profile_tests` (`oot3d_top_screen_ocarina_tests.cpp`: empty
+  staff shows the menu; a note in slot 0 or 7 hides it; no browsing or toggle while hidden; it
+  returns when the slots are empty again). Console check: free play, a few notes (menu hides),
+  eight wrong notes (menu returns after the drop), B and reopen, a recognised song.
+
+### Message button icons: ZL/ZR for the game's L/R (user, 0.2.4, 11/13)
+- **Seen:** "our dialogue boxes around the game still say L instead of ZL" (screenshot
+  `Images/13/2026111310285900-*.jpg`: the ocarina prompt "Play with L, Y, X, A, and R").
+- **Cause:** a message shows a button icon with `7F 24 n` (eu.qm: the prompt is `\x7F$\x0A` ... `\x7F$\x0B`;
+  10 = L, 11 = R): sprite 100 + n of `message/sprite.qsp`, a 16x16 cell of `message/parts.ctxb` (256x128 RGBA4;
+  L at (192,32), R at (208,32), a second L/R pair at (0,48)/(16,48)). No font is involved (ltn16/sys8 have no button
+  glyphs) and the atlas has no ZL/ZR. EUR and USA have the same file; Henriko 5.0a replaces it (L/R in the same cells).
+- **Change:** the deko3d renderer rewrites those cells when it makes the atlas's texture, from the pixels at hand
+  (native or the pack image): the plate and its letter stay, the letter narrower behind a "Z" in its ink
+  (`fast/oot3d/message_button_glyphs.h`). The atlas is recognised by its encoded bytes (FNV-1a 64
+  `1A6286E6EC1FF273`); a relabelled atlas is a texture of its own (key salt), so a binding change makes it
+  again, and the pack is still looked up by the game's bytes. Which icons: `MessageShoulderGlyphsForBindings`
+  (ZL when the game's L is bound to the button labelled ZL; on the Switch the SDL shoulders, crossed on purpose),
+  published every refresh beside `SetTopScreenSwappedItemLabels`. Defaults: ZL/ZR; after "Swap shoulders /
+  triggers": the game's L/R. The HUD and other renderers are unchanged.
+- **Not changed:** Henriko's pack draws the Item I/II message icons (codes 28/29) as ZR/ZL, while the Switch
+  defaults put the items on L/R.
+- **Test:** `oot3d_message_button_glyphs_tests` (bindings, key salt, identity, rewrite at 1x/3x/4x). Console check:
+  a Navi Z-target tip and the ocarina prompt with the defaults (ZL/ZR), pack on and off; then the swap (L/R).
+
+### D-pad items blinking while Link held an item (player report, 0.2.4, 11/13)
+- **Seen:** "blinking in the D-pad menu ... while I was aiming or something". Clip 2026111310222100 (child,
+  Hyrule Field at night): from frame 566, with an item in Link's hand ("Put Away"), the Beans and Deku Nuts
+  on the D-pad and their ammo go grey on one captured frame in three, very regularly, until the clip ends;
+  the cross, the View eye, the Ocarina and the game's Y/X/I/II icons (dim since frame 551) stay steady.
+- **Cause:** two threads write the Y/X/I/II statuses (`0x00588EC8..CB`) every frame.
+  `Interface_UpdateButtonRestrictions` (`0x00475CA8`, game thread, `Gameplay_Update`) enables them again
+  (`0x00476B5C..0x00476C40`, bottles `0x00476418..`, the Ocarina `0x004767C4`); `PauseTouchButtons_Update`
+  (`0x0042DF3C`, Graph thread, `PauseUi_Update` `0x0041E968`) disables them for some Player states
+  (`Player_QueryInteractionState` `0x00374BE8`, `0x0042E2F0..0x0042E564`; the Ocarina alone in the air,
+  `0x0042E274`) and never enables. The touch buttons are drawn from the Graph thread's statuses
+  (`0x00444AB0`: alpha 0.5 and a bit in `0x0050AF34 + 0x68`), so they stayed grey; the HUD's
+  `ReadTopScreenDpadItemUsability` read the live bytes at host time, sometimes between the two writes, and
+  the "Y/X/I/II all disabled" rule (3.2.2 `0x005D17F8`) let the items through.
+- **Fix:** the HUD reads the touch flags word too (`SettleTopScreenDpadItemHudState`): a button disabled
+  there (Y `0x00800000`, X `0x01000000`, I `0x04000000`, II `0x02000000`) counts as disabled, and an
+  Ocarina in an Item direction greys while the touch Ocarina is not usable (`0x08000000`). The flags never
+  enable a status. The press hooks keep the live statuses, as 3.2.2 reads them inside the step.
+- **Test:** `oot3d_top_screen_mod_profile_tests` (TestSettledStatuses; TestDispatch: the HUD greys with the
+  touch screen's disabled buttons). Console check: Beans and Deku Nuts on the child D-pad; take an item in
+  hand (Put Away), aim the slingshot, Z-target: the D-pad items stay grey with the game's Y/X/I/II, without
+  blinking, and are usable again when the item is put away.
+
+### Ice Cavern and Zora's River slowdowns: 21 missing shaders (user, logs45, 0.2.4, 11/13)
+- **Seen:** "more drops in the ice cavern", "a drop at the waterfall". Ice Cavern rooms 1 and 9: 8-15 FPS
+  with `gpu_ms` 65-116 at CPU 1224 / GPU 461; `programs (frame)` there: 58-77 parametric (uber) draws a frame
+  over 53-71 M pixels. Zora's River room 1: 28-34 FPS, `gpu_ms` 29-36.
+- **Cause:** fragment texts not in the pack (`shaders: fragment ... not in the pack`): 8 in the Ice Cavern,
+  3 in Zora's River, 5 in Hyrule Field, 3 in Zora's Fountain, 1 in Zora's Domain, and one older file.
+- **Fix:** the 21 texts of `logs/deko3d_shaders/` went to `shaders/console-missing/` (86 files); uam compiles
+  all of them, no scratch. The release build adds them and their lighting variants to the pack.
+
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go
   underground" in the Forest Temple.

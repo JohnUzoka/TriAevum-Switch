@@ -19,6 +19,7 @@
 #include "oot3d/renderer/azahar_texture_pack.h"
 #endif
 #include "fast/oot3d/pica_texture_predecode.h"
+#include "oot3d_message_button_glyphs.h"
 #include "oot3d/renderer/azahar_texture_pack_settings.h"
 #include <imgui.h>
 #include "fast/backends/gl_frame_profiler.h"
@@ -990,6 +991,10 @@ bool NativeA32WindowSession::RunFrame() {
             Oot3dNativeGame::NativeGamepadButton::RightShoulder,
         gamepad(Oot3dNativeGame::NativeControlAction::Zl) ==
             Oot3dNativeGame::NativeGamepadButton::LeftShoulder);
+    // The message L/R icons read ZL/ZR while the game's L/R are on ZL/ZR
+    // (the renderer rewrites the message atlas's cells, message_button_glyphs.h).
+    Fast::Oot3d::SetMessageShoulderGlyphs(
+        Oot3dNativeGame::MessageShoulderGlyphsForBindings(controls.Config));
   }
   uiLifecycleBridge.BeginHostFrame(
       static_cast<uint32_t>(presentationFrameCount));

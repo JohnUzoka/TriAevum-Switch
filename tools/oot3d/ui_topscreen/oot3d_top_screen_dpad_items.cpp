@@ -204,16 +204,27 @@ std::string DescribeTopScreenDpadItemPicker(const TopScreenDpadItemPickerState &
   return line;
 }
 
+void SettleTopScreenDpadItemHudState(TopScreenDpadItemGuestState &state,
+                                     std::uint32_t touchFlags) noexcept {
+  for (std::size_t button = 0; button < state.ButtonStatus.size(); ++button)
+    if ((touchFlags & kTopScreenTouchButtonDisabled[button]) != 0U)
+      state.ButtonStatus[button] = 0xFFU;
+  if ((touchFlags & kTopScreenTouchOcarinaDisabled) != 0U && state.OcarinaRestricted == 0U)
+    state.OcarinaRestricted = 0xFFU;
+}
+
 bool ReadTopScreenDpadItemUsability(NativeA32Memory &memory,
                                     const std::array<std::uint8_t, 4> &childSlots,
                                     const std::array<std::uint8_t, 4> &adultSlots,
                                     std::array<bool, 4> *usable) {
-  std::uint32_t play = 0U;
+  std::uint32_t play = 0U, touchFlags = 0U;
   TopScreenDpadItemGuestState state;
   if (usable == nullptr || !memory.Read32(kGameplayRoot + 0x0CU, &play) ||
+      !memory.Read32(kTopScreenTouchFlags, &touchFlags) ||
       !ReadTopScreenDpadItemGuestState(memory, play, childSlots, adultSlots,
                                        &state))
     return false;
+  SettleTopScreenDpadItemHudState(state, touchFlags);
   for (std::size_t direction = 0; direction < usable->size(); ++direction)
     (*usable)[direction] =
         ResolveTopScreenDpadItem(state, direction) != kTopScreenNoItem;

@@ -92,8 +92,35 @@ bool ReadTopScreenDpadItemGuestState(
     const std::array<std::uint8_t, 4> &adultSlots,
     TopScreenDpadItemGuestState *state);
 
+// The touch screen's flags word (0x0050AF34 + 0x68). Each Graph thread frame,
+// after its own disables, PauseTouchButtons_RefreshItemAvailability
+// (0x00444AB0) sets one bit per Y, X, I, II button whose status is 0xFF, and
+// 0x08000000 when the touch Ocarina is not usable (0x002EFFF8 != 1: no
+// Ocarina, 0x00588ECD set, the touch state +0x70, or Player query 6).
+inline constexpr std::uint32_t kTopScreenTouchFlags = 0x0050AF9CU;
+inline constexpr std::array<std::uint32_t, 4> kTopScreenTouchButtonDisabled{
+    0x00800000U, 0x01000000U, 0x04000000U, 0x02000000U};
+inline constexpr std::uint32_t kTopScreenTouchOcarinaDisabled = 0x08000000U;
+
+// The statuses as the Graph thread leaves them, for the HUD. Two threads
+// write them every frame: Interface_UpdateButtonRestrictions (0x00475CA8, in
+// Gameplay_Update on the game thread) enables Y/X/I/II again
+// (0x00476B5C..0x00476C40, bottles 0x00476418..) and the Ocarina
+// (0x004767C4), then PauseTouchButtons_Update (0x0042DF3C, PauseUi_Update on
+// the Graph thread) disables them for some Player states
+// (Player_QueryInteractionState 0x00374BE8: 0x0042E2F0..0x0042E564; the
+// Ocarina alone in the air, 0x0042E274), never enabling. A host read between
+// the two saw them enabled: the D-pad items blinked between usable and grey
+// (0.2.4 clip, an item in Link's hand, one captured frame in three grey),
+// while the touch buttons, drawn from the Graph thread's statuses, stayed
+// grey. A status disabled in the flags word stays disabled.
+void SettleTopScreenDpadItemHudState(TopScreenDpadItemGuestState &state,
+                                     std::uint32_t touchFlags) noexcept;
+
 // Per direction: its D-pad item button resolves an item now (the gameplay
-// rules, on the root PlayState). For the HUD, which greys the others.
+// rules, on the root PlayState, with the settled statuses above). For the
+// HUD, which greys the others. The hooks keep the live statuses, as 3.2.2
+// reads them inside the step.
 bool ReadTopScreenDpadItemUsability(NativeA32Memory &memory,
                                     const std::array<std::uint8_t, 4> &childSlots,
                                     const std::array<std::uint8_t, 4> &adultSlots,

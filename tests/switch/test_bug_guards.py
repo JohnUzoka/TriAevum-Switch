@@ -2819,6 +2819,50 @@ GUARDS = [
     Guard("[compatibility] the OoT3D save on the Switch stays at sdmc:/switch/oot3dre/savedata",
           "tools/oot3d/native_game_runtime/oot3d_native_game.cpp",
           r'const_cast<char\*>\("--save-data"\),\s+const_cast<char\*>\("sdmc:/switch/oot3dre/savedata"\)'),
+    Guard("the song menu overlapped the notes played into the game's ocarina staff (0.2.4 player report): "
+          "it yields while the message context's staff holds a note and returns when the game empties it",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_ocarina.cpp",
+          r'kStaffNoteSlots = 0x005C1878U \+ 0x44U \+ 0x954U;.*?state->StaffNotes = note != 0xFFU;.*?'
+          r'if \(!state\.Active \|\| state\.StaffNotes\) return;.*?'
+          r'if \(!state\.Active \|\| state\.StaffNotes \|\| browser\.GuideHidden\(\)\) return true;',
+          "oot3d_top_screen_mod_profile_tests (oot3d_top_screen_ocarina_tests.cpp)"),
+    Guard("the D-pad items blinked between usable and grey while Link held an item (0.2.4, player clip "
+          "2026111310222100: one captured frame in three grey from frame 566): the game thread enables "
+          "Y/X/I/II each step (0x00476B5C) and the Graph thread disables them (0x0042E2F0), and the HUD "
+          "read the live statuses in between; it now takes the touch screen's flags word (0x0050AF9C) too",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.cpp",
+          r'if \(\(touchFlags & kTopScreenTouchButtonDisabled\[button\]\) != 0U\)\s+state\.ButtonStatus\[button\] = 0xFFU;.*?'
+          r'!memory\.Read32\(kTopScreenTouchFlags, &touchFlags\).*?'
+          r'SettleTopScreenDpadItemHudState\(state, touchFlags\);\s+for \(std::size_t direction',
+          "oot3d_top_screen_mod_profile_tests (TestSettledStatuses, TestDispatch)"),
+    Guard("the D-pad's settled statuses: the touch flags word and its Y/X/I/II disabled bits",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.h",
+          r'kTopScreenTouchFlags = 0x0050AF9CU;.*?kTopScreenTouchButtonDisabled\{\s*0x00800000U, 0x01000000U, 0x04000000U, 0x02000000U\};',
+          "oot3d_top_screen_mod_profile_tests (TestSettledStatuses)"),
+    Guard("dialogue boxes said L/R for the Z-target and shield the Switch defaults put on ZL/ZR (user, 0.2.4, "
+          "11/13): the message atlas (parts.ctxb) is its own texture while relabelled, and its L/R cells are "
+          "rewritten in the native and the texture pack image",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_resources.cpp",
+          r'UploadReplacement\(view, replacementKey, \*polled\.Replacement, menu, native\.MessageGlyphs\).*?'
+          r'const PicaTextureKey key = MakePicaTextureKey\(view, contentHash \^ glyphSalt\);.*?'
+          r'Oot3d::IsMessagePartsAtlas\(view\.NativeFormat, view\.Width, view\.Height, view\.NativeBytes\).*?'
+          r'std::memcpy\(destination, bytes\.data\(\), copied\);\s+Oot3d::RewriteMessageShoulderGlyphs\(messageGlyphs, bytes,.*?'
+          r'std::memcpy\(destination, source, mip\.Bytes\);.*?Oot3d::RewriteMessageShoulderGlyphs\(messageGlyphs, std::span<const uint8_t>\(source, mip\.Bytes\)',
+          "oot3d_message_button_glyphs_tests"),
+    Guard("message L/R icons follow the bindings every frame (ZL/ZR on the defaults, L/R after Swap shoulders / triggers)",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
+          r'Fast::Oot3d::SetMessageShoulderGlyphs\(\s*Oot3dNativeGame::MessageShoulderGlyphsForBindings\(controls\.Config\)\);',
+          "oot3d_message_button_glyphs_tests (Bindings)"),
+    Guard("message ZL/ZR: on the Switch the SDL shoulders are the buttons labelled ZL/ZR (crossed mapping)",
+          "tools/oot3d/native_game_runtime/oot3d_message_button_glyphs.h",
+          r'shouldersAreZlZr \? NativeGamepadButton::LeftShoulder : NativeGamepadButton::LeftTrigger;.*?'
+          r'if \(gamepad\(NativeControlAction::L\) == zl\) mask \|= Fast::Oot3d::kMessageGlyphZl;\s+'
+          r'if \(gamepad\(NativeControlAction::R\) == zr\) mask \|= Fast::Oot3d::kMessageGlyphZr;',
+          "oot3d_message_button_glyphs_tests (Bindings)"),
+    Guard("message ZL/ZR: the message icons 10/11 and the second L/R pair of the atlas",
+          "runtime/three_ds_recomp/include/fast/oot3d/message_button_glyphs.h",
+          r'\{192U, 32U, kMessageGlyphZl\},\s+\{208U, 32U, kMessageGlyphZr\},\s+\{0U, 48U, kMessageGlyphZl\},\s+\{16U, 48U, kMessageGlyphZr\},',
+          "oot3d_message_button_glyphs_tests (CheckRewrite)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

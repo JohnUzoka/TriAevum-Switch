@@ -350,6 +350,16 @@ target_compile_options(oot3d_native_control_config PRIVATE
     "${WARNING_OVERRIDE}")
 oot3d_target_defaults(oot3d_native_control_config NO_WARNING_OVERRIDE FOLDER Tools)
 
+# The game's message L/R icons read ZL/ZR from the bindings; the message
+# atlas's cells rewritten for it (fast/oot3d/message_button_glyphs.h).
+add_executable(oot3d_message_button_glyphs_tests EXCLUDE_FROM_ALL
+    tools/oot3d/native_game_runtime/oot3d_message_button_glyphs_tests.cpp)
+target_include_directories(oot3d_message_button_glyphs_tests PRIVATE
+    runtime/three_ds_recomp/include)
+target_link_libraries(oot3d_message_button_glyphs_tests PRIVATE
+    oot3d_native_control_config)
+oot3d_target_defaults(oot3d_message_button_glyphs_tests FOLDER Tests)
+
 # Saving a file again on the Switch (ship/config/FileReplace.h): the config and
 # cache writers against Horizon's rename semantics (EEXIST over an existing
 # file), simulated by the test's own rename(). Linux hosts (renameat2).

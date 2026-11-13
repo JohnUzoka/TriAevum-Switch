@@ -8,9 +8,15 @@ struct TopScreenOcarinaState {
   bool Active = false;
   std::uint32_t Page = 0;
   std::uint32_t CursorSong = 0;
+  // The game's own ocarina staff (the "Play with ..." box the menu draws
+  // into) shows notes the player has played. Read only while Active. A port
+  // rule, not 3.2.2's: the song menu yields to the played notes so the two
+  // never share the staff, and returns once the game empties it.
+  bool StaffNotes = false;
 };
 
 // 2.1.1 owners 0x005C9ED8 and 0x005D2078. This is independent of pause.
+// StaffNotes: the eight note slots of the message context's ocarina staff.
 bool ReadTopScreenOcarinaState(NativeA32Memory &memory,
                               TopScreenOcarinaState *state);
 

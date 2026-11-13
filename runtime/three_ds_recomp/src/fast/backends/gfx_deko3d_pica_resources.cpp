@@ -5,6 +5,7 @@
 #include "fast/backends/gfx_deko3d.h"
 #include "fast/oot3d/config_writer.h"
 #include "fast/oot3d/gl_widescreen_menu_policy.h"
+#include "fast/oot3d/message_button_glyphs.h"
 #include "fast/oot3d/pica_texture_predecode.h"
 #include "fast/oot3d/pica_uniform_layout.h"
 #include "gfx_opengl_pica_residency.h"
@@ -494,7 +495,7 @@ void PicaResources::UploadReadyReplacements() {
             replacementKey.ContentHash ^= kReplacementKeySalt;
             const Renderer3ds::PicaTextureView view = native.PackView; // `native` may move on insert
             const bool menu = native.PackMenu;
-            if (UploadReplacement(view, replacementKey, *polled.Replacement, menu) != 0U) {
+            if (UploadReplacement(view, replacementKey, *polled.Replacement, menu, native.MessageGlyphs) != 0U) {
                 // The native texture is never drawn again.
                 Retire(mTextures.find(key)->second);
                 mTextures.erase(key);
@@ -773,7 +774,11 @@ void PicaResources::Evict() {
 DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& view, bool menuDraw) {
     const DkResHandle fallback = dkMakeTextureHandle(kFallbackColorImage, kNearestSampler);
     const uint64_t contentHash = view.NativeContentHashAvailable ? view.NativeContentHash : HashBytes(view.NativeBytes);
-    const PicaTextureKey key = MakePicaTextureKey(view, contentHash);
+    // The message atlas with its L/R icons relabelled is another texture (message_button_glyphs.h).
+    const uint8_t shoulderGlyphs = Oot3d::MessageShoulderGlyphs();
+    const uint64_t glyphSalt =
+        Oot3d::MessagePartsAtlasKeySalt(view.NativeFormat, view.Width, view.Height, shoulderGlyphs);
+    const PicaTextureKey key = MakePicaTextureKey(view, contentHash ^ glyphSalt);
     PicaTextureKey replacementKey = key;
     replacementKey.ContentHash ^= kReplacementKeySalt;
     if (mTexturePack) {
@@ -867,6 +872,10 @@ DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& vie
         }
         return rememberFallback();
     }
+    const uint8_t messageGlyphs =
+        glyphSalt != 0U && Oot3d::IsMessagePartsAtlas(view.NativeFormat, view.Width, view.Height, view.NativeBytes)
+            ? shoulderGlyphs
+            : 0U;
     ::Oot3d::Renderer::AzaharTextureResolveResult pack;
     bool menu = false;
     if (mTexturePack && ClassifyPicaTexture(view) == PicaTextureUse::Color) {
@@ -884,7 +893,8 @@ DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& vie
                 .Menu = menu,
             });
             if (pack.State == ::Oot3d::Renderer::AzaharTextureResolveState::Ready && pack.Replacement != nullptr) {
-                if (const DkResHandle handle = UploadReplacement(view, replacementKey, *pack.Replacement, menu)) {
+                if (const DkResHandle handle =
+                        UploadReplacement(view, replacementKey, *pack.Replacement, menu, messageGlyphs)) {
                     mStats.MenuTexturesReady += menu ? 1U : 0U;
                     mScene.Ready += menu ? 0U : 1U;
                     return handle;
@@ -917,6 +927,7 @@ DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& vie
         texture.PackView.CopyReferences = {};
     }
     texture.PackEpoch = mPackEpoch;
+    texture.MessageGlyphs = messageGlyphs;
     if (!CreateImage(texture, DkImageFormat_RGBA8_Unorm, view.Width, view.Height, levels)) {
         if (mStats.TextureFailures++ < 10U) {
             Log("resources: no memory/slot for a %ux%u texture (%llu MiB live)", view.Width, view.Height,
@@ -927,8 +938,11 @@ DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& vie
     for (uint32_t level = 0U; level < levels; ++level) {
         const auto& mip = mips[level];
         const auto& bytes = decoded->Mips[level];
-        std::memcpy(static_cast<uint8_t*>(staging.Cpu) + mip.Offset, bytes.data(),
-                    std::min<size_t>(bytes.size(), mip.Bytes));
+        const size_t copied = std::min<size_t>(bytes.size(), mip.Bytes);
+        uint8_t* const destination = static_cast<uint8_t*>(staging.Cpu) + mip.Offset;
+        std::memcpy(destination, bytes.data(), copied);
+        Oot3d::RewriteMessageShoulderGlyphs(messageGlyphs, bytes, std::span<uint8_t>(destination, copied),
+                                            mip.Width, mip.Height);
         UploadLevel(texture, level, mip.Width, mip.Height, staging.Gpu + mip.Offset);
     }
     PicaSamplerKey samplerKey = MakePicaSamplerKey(view, levels);
@@ -956,7 +970,7 @@ DkResHandle PicaResources::TextureHandle(const Renderer3ds::PicaTextureView& vie
 
 DkResHandle PicaResources::UploadReplacement(const Renderer3ds::PicaTextureView& view, const PicaTextureKey& key,
                                              const ::Oot3d::Renderer::AzaharTextureReplacement& replacement,
-                                             bool menu) {
+                                             bool menu, uint8_t messageGlyphs) {
     const auto& rgba = replacement.Rgba8;
     const uint64_t baseBytes = static_cast<uint64_t>(replacement.Width) * replacement.Height * 4U;
     if (rgba == nullptr || rgba->size() < baseBytes || baseBytes > UINT32_MAX) {
@@ -1001,8 +1015,13 @@ DkResHandle PicaResources::UploadReplacement(const Renderer3ds::PicaTextureView&
     }
     for (uint32_t level = 0U; level < levels; ++level) {
         const auto& mip = mips[level];
-        std::memcpy(static_cast<uint8_t*>(staging.Cpu) + mip.Offset,
-                    level == 0U ? rgba->data() : replacement.Mips[level - 1U].data(), mip.Bytes);
+        const uint8_t* const source = level == 0U ? rgba->data() : replacement.Mips[level - 1U].data();
+        uint8_t* const destination = static_cast<uint8_t*>(staging.Cpu) + mip.Offset;
+        std::memcpy(destination, source, mip.Bytes);
+        // The pack's image of the message atlas: its own L/R cells relabelled
+        // (the shared image itself stays as the pack made it).
+        Oot3d::RewriteMessageShoulderGlyphs(messageGlyphs, std::span<const uint8_t>(source, mip.Bytes),
+                                            std::span<uint8_t>(destination, mip.Bytes), mip.Width, mip.Height);
         UploadLevel(texture, level, mip.Width, mip.Height, staging.Gpu + mip.Offset);
     }
     // The native sampler, its LOD range moved down by the levels the larger image adds.
