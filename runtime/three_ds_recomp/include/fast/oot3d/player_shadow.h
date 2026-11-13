@@ -462,6 +462,8 @@ class PlayerShadowBridge final {
         }
         mFrames.push_back({sourceFrame, shadow});
         while (mFrames.size() > 4U) mFrames.pop_front();
+        ++mStats.Published;
+        mStats.WithShadow += shadow.has_value() ? 1U : 0U;
     }
     void SelectSample(const Renderer3ds::PicaFrameTemporalSample& sample) {
         std::scoped_lock lock(mMutex);
@@ -471,6 +473,7 @@ class PlayerShadowBridge final {
             return nullptr;
         };
         const auto* current = find(sample.CurrentSourceFrameId);
+        mStats.SamplesWithoutFrame += current == nullptr ? 1U : 0U;
         mSelected = current != nullptr ? *current : std::nullopt;
         if (!mSelected || sample.HistoryReset || !(sample.Alpha > 0.0F && sample.Alpha < 1.0F)) return;
         const auto* previous = find(sample.PreviousSourceFrameId);
@@ -486,6 +489,16 @@ class PlayerShadowBridge final {
         mixed.Height = blend((*previous)->Height, mSelected->Height);
         mixed.Opacity = blend((*previous)->Opacity, mSelected->Opacity);
         mSelected = mixed;
+    }
+    // For the renderer's shadow line (logs39: whether frames reach it without a shadow).
+    struct Stats {
+        uint64_t Published = 0;            // native frames handed over
+        uint64_t WithShadow = 0;           // of them, with Link's shadow
+        uint64_t SamplesWithoutFrame = 0;  // drawn samples whose frame was not here
+    };
+    [[nodiscard]] Stats Counters() const {
+        std::scoped_lock lock(mMutex);
+        return mStats;
     }
     [[nodiscard]] std::optional<PlayerShadowFrame> Selected() const {
         std::scoped_lock lock(mMutex);
@@ -513,6 +526,7 @@ class PlayerShadowBridge final {
     mutable std::mutex mMutex;
     std::deque<Entry> mFrames;
     std::optional<PlayerShadowFrame> mSelected;
+    Stats mStats;
     std::atomic<bool> mRendererReady{false};
     std::atomic<PlayerShadowMethod> mMethod{kPlayerShadowDefaultMethod};
 };

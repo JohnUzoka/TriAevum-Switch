@@ -147,7 +147,7 @@ void TestHook() {
   state.r[0] = kLink;
   state.r[14] = kCaller;
   Require(!runtime.Execute(state, memory, false, true, false).has_value() && memory.Writes == 0 &&
-              !runtime.Pending() && !runtime.TakeFrame().has_value(),
+              !runtime.Pending() && !runtime.FrameForPublish().has_value(),
           "off: the block runs as is");
   Require(!runtime.Execute(state, memory, true, false, false).has_value() && memory.Writes == 0 && !runtime.Pending(),
           "outside compiled code: no sequence starts");
@@ -161,9 +161,12 @@ void TestHook() {
   const auto exit = runtime.Execute(state, memory, true, true, false);
   Require(exit == kCaller && state.r[14] == kCaller && !runtime.Pending(), "back to Actor_Draw");
   Require(memory.Read8(kLink + kSimpleShadowAlphaOffset, &alpha) && alpha == 255U, "the alpha back");
-  const auto frame = runtime.TakeFrame();
-  Require(frame && frame->Actor == kLink && !runtime.TakeFrame().has_value() && runtime.ShadowFrames() == 1U,
-          "the frame's shadow, taken once");
+  const auto frame = runtime.FrameForPublish();
+  Require(frame && frame->Actor == kLink && runtime.ShadowFrames() == 1U, "the frame's shadow");
+  // logs39: one completed frame in three had none when each decision was
+  // taken once; one serves the frames until the next, at most two.
+  Require(runtime.FrameForPublish().has_value() && !runtime.FrameForPublish().has_value(),
+          "a decision serves the next completed frame too, not a third");
 
   state.r[0] = kLink;
   state.r[1] = 0x08500000U; // lights
@@ -193,6 +196,7 @@ void TestHook() {
   Require(!runtime.Execute(state, onEpona, true, true, false).has_value() && onEpona.Writes == 0 &&
               !runtime.Pending(),
           "on Epona: the game's own (no) shadow");
+  Require(!runtime.FrameForPublish().has_value(), "a refusal replaces the last decision");
 
   auto cutscene = Standing();
   cutscene.StateFlags1 = kSimpleShadowCutscene;
@@ -206,7 +210,7 @@ void TestHook() {
   Require(!runtime.Execute(state, inCutscene, true, true, true).has_value() && runtime.Pending(),
           "in a cutscene with Shadow in cutscenes on: the body");
   state.r[14] = 0x001D0818U;
-  Require(runtime.Execute(state, inCutscene, true, true, true) == kCaller && runtime.TakeFrame().has_value(),
+  Require(runtime.Execute(state, inCutscene, true, true, true) == kCaller && runtime.FrameForPublish().has_value(),
           "and its frame");
 
   state.r[14] = kCaller;
@@ -222,7 +226,7 @@ void TestHook() {
   state.r[14] = kCaller;
   (void)runtime.Execute(state, memory, true, true, false);
   runtime.Reset();
-  Require(!runtime.Pending() && !runtime.TakeFrame().has_value(), "a state load resets it");
+  Require(!runtime.Pending() && !runtime.FrameForPublish().has_value(), "a state load resets it");
 }
 
 void TestConfig() {

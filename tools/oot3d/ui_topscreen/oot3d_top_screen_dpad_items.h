@@ -107,6 +107,10 @@ struct TopScreenDpadItemPickerState {
   std::uint32_t PageState = 0U;   // Items page state 0x0050672C
   bool Browsing = false;          // PageState == 2
   std::uint32_t Position = 0U;    // hovered grid position, 0x00506748
+  // The game's other Items position, 0x0050674C (the 2.1.1 ZR/ZL selection
+  // writes it): logged beside Position (issue #13) to tell which one follows
+  // the cursor on the console.
+  std::uint32_t OtherPosition = 0U;
   std::uint32_t Age = 0U;         // 0 adult, 1 child
   // The grid of the current age: position -> slot (SaveContext +0x138A for
   // the child, +0x13A2 for the adult, as PauseItemsPage_CanSwapSelectedSlots).

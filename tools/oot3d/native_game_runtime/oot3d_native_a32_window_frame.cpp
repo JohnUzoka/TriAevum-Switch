@@ -4238,7 +4238,7 @@ void NativeA32WindowSession::PresentVisualFrame(
             Fast::Oot3d::GrassInteractionBridge::Instance().PublishFrame(
                 currentVisualFrame->Sequence, frameActors);
             Fast::Oot3d::PlayerShadowBridge::Instance().PublishFrame(
-                currentVisualFrame->Sequence, simpleShadow.TakeFrame());
+                currentVisualFrame->Sequence, simpleShadow.FrameForPublish());
             selectedNewVisualFrame = true;
             renderFrameKind =
                 static_cast<uint8_t>(Oot3dNativeGame::RenderFrameKind::Step);

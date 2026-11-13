@@ -874,10 +874,36 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   `0x005D3358` copies it each update except in page states 8, 9 and 12. Nothing found wrong.
 - **Log (0.2.4-test.2 on):** a game log line on the A press and on each D-pad direction while A is
   held, on any page state but 0, at most 30 a session: `dpad picker: <A held|up|down|left|right>
-  page_state=.. position=.. age=.. slot=.. item=0x.. item_age=..: takes it | refused: <not browsing
+  page_state=.. position=.. other_position=.. age=.. slot=.. item=0x.. item_age=..: takes it | refused: <not browsing
   the Items page | no hovered position | no slot at that position | no item a D-pad direction can
   hold | the item is for the other age>` (`DescribeTopScreenDpadItemPicker`).
+- **Console, 11/13 (user, 0.2.3):** holding A over an item and pressing a direction moved the cursor:
+  the picker refused the item and let the D-pad through. `other_position` is the game's second Items
+  position (`0x0050674C`, which the 2.1.1 ZR/ZL selection writes and the game reads with `0x00506748`
+  at `0x00446A70`): the log tells which of the two follows the cursor.
 - **Test:** `oot3d_top_screen_mod_profile_tests` (TestPicker, the log lines).
+
+### Simple shadow flashing back to the foot spots (logs39 and three captures, 11/13)
+- **Seen:** "the shadow is pretty glitchy" (user, three clips at 21:27-21:28, Shadow method Texture;
+  logs39 from 0.2.3 build 36). In the clips the dark area under Link loses about 1,800 pixels on one
+  captured frame in three (the gap between dropouts is three 30 FPS frames in 50 of 63 cases), its
+  centre jumping up and left, then comes back; the same area at the left of the screen does not flash.
+  logs39's renderer counted a shadow on 101 of 150 frames in nine windows in a row at a steady 60 FPS
+  (half of them in-between frames), and on 49-61 of 150 in windows whose in-between frames were all
+  dropped: about one game step in three had no shadow, both its frames.
+- **Cause:** `SimpleShadowRuntime` handed its decision over once (`TakeFrame`, `std::exchange`) to the
+  completed visual frame published next. A frame completes when its display transfer arrives, which
+  can be after the next step's `Player_DrawFeetShadow` (that frame took the next step's decision) or
+  together with another (one host step finishing two), so the following frame was published with
+  nothing: no body shadow, and the hook had not set Link's alpha to 0, so the game's foot spots were
+  drawn there. [INFERENCE: from the one-in-three pattern and the code; no per-frame record of it.]
+- **Fix:** `FrameForPublish`: Link's latest decision, a refusal included (it now replaces the last
+  one), serves every completed frame until the next decision, at most
+  `kSimpleShadowFrameLifetime` (2) frames without Link drawn (first person, a scene change).
+- **Log:** the renderer's `shadow:` line in `deko3d.txt` ends with `game frames N, with a shadow N,
+  samples without their frame N` (`PlayerShadowBridge::Counters`).
+- **Test:** `oot3d_simple_shadow_tests` (TestHook: a decision serves two completed frames, a refusal
+  replaces it); guard "logs39: the simple shadow dropped out ...".
 
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go

@@ -469,16 +469,19 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     if (shadow.Frames++ % kPlayerShadowReportFrames == 0U) {
         const std::string_view word = Oot3d::PlayerShadowMethodWord(method);
         const auto& drawn = shadow.MethodFrames;
+        const auto bridgeCounters = Oot3d::PlayerShadowBridge::Instance().Counters();
         Log("shadow: frame %llu %.*s, %zu meshes opacity %.2f height %.0f | %llu frames (two_pass %llu, one_pass "
             "%llu, cover %llu, texture %llu), %llu meshes, %llu skipped, %llu frames without the stencil bit, %llu "
-            "full stencil clears",
+            "full stencil clears | game frames %llu, with a shadow %llu, samples without their frame %llu",
             static_cast<unsigned long long>(mDevice.Frame()), static_cast<int>(word.size()), word.data(),
             draws.size(), static_cast<double>(opacity), static_cast<double>(shadow.Selected->Height),
             static_cast<unsigned long long>(shadow.Frames), static_cast<unsigned long long>(drawn[0]),
             static_cast<unsigned long long>(drawn[1]), static_cast<unsigned long long>(drawn[2]),
             static_cast<unsigned long long>(drawn[3]), static_cast<unsigned long long>(shadow.Meshes),
             static_cast<unsigned long long>(shadow.Skipped), static_cast<unsigned long long>(shadow.StencilFrames),
-            static_cast<unsigned long long>(shadow.FullClears));
+            static_cast<unsigned long long>(shadow.FullClears), static_cast<unsigned long long>(bridgeCounters.Published),
+            static_cast<unsigned long long>(bridgeCounters.WithShadow),
+            static_cast<unsigned long long>(bridgeCounters.SamplesWithoutFrame));
     }
 }
 

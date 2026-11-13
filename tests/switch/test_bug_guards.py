@@ -2477,9 +2477,18 @@ GUARDS = [
           "selects it",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
           r'PlayerShadowBridge::Instance\(\)\.PublishFrame\(\s+currentVisualFrame->Sequence, '
-          r'simpleShadow\.TakeFrame\(\)\);.*?'
+          r'simpleShadow\.FrameForPublish\(\)\);.*?'
           r'PlayerShadowBridge::Instance\(\)\.SelectSample\(temporalSample\);',
           "oot3d_player_shadow_tests (TestBridge)"),
+    Guard("logs39: the simple shadow dropped out on about one completed frame in three (the game's foot spots "
+          "flashed in its place): Link's latest decision, a refusal included, serves each completed frame "
+          "until the next one, for at most kSimpleShadowFrameLifetime frames",
+          "tools/oot3d/native_game_runtime/oot3d_simple_shadow.h",
+          r'if \(!actor \|\| actor->Id != 0U\) return std::nullopt;.*?mFrameAge = 0U;\s+mFrame\.reset\(\);.*?'
+          r'FrameForPublish\(\) noexcept \{\s+if \(mFrameAge >= kSimpleShadowFrameLifetime\) return std::nullopt;'
+          r'\s+\+\+mFrameAge;\s+return mFrame;',
+          "oot3d_simple_shadow_tests (TestHook)",
+          forbid=r'std::exchange\(mFrame'),
     Guard("Simple shadow: taken only from Link's opaque scene draws whose depth is the rasterizer's (the floor "
           "was tested with it)",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",

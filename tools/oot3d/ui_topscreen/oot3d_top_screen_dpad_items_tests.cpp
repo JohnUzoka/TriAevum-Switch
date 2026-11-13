@@ -360,13 +360,13 @@ void TestPicker() {
   picker.PageState = 2U;
   picker.Position = 1U;
   const auto taken = DescribeTopScreenDpadItemPicker(picker, 1U, -1);
-  Require(taken.find("dpad picker: A held page_state=2 position=1 age=adult slot=1 item=0x") == 0U &&
+  Require(taken.find("dpad picker: A held page_state=2 position=1 other_position=0 age=adult slot=1 item=0x") == 0U &&
               taken.ends_with(": takes it"),
           "the picker log line names what it read and that it took the item");
   picker.Position = 2U;
   picker.Age = 1U;
   Require(DescribeTopScreenDpadItemPicker(picker, slot(2), 3).find(
-              "dpad picker: right page_state=2 position=2 age=child slot=15") == 0U &&
+              "dpad picker: right page_state=2 position=2 other_position=0 age=child slot=15") == 0U &&
               DescribeTopScreenDpadItemPicker(picker, slot(2), 3)
                   .ends_with("refused: the item is for the other age"),
           "the picker log line says why it refused the item");

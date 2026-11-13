@@ -56,6 +56,8 @@ inline constexpr float kSimpleShadowNormalScale = 1.0F / 32767.0F;
 inline constexpr float kSimpleShadowMinimumFloorNormal = 0.3F;
 inline constexpr float kSimpleShadowLowest = -50.0F;
 inline constexpr float kSimpleShadowHighest = 1500.0F;
+// Completed frames one decision of the hook serves (SimpleShadowRuntime::FrameForPublish).
+inline constexpr std::uint32_t kSimpleShadowFrameLifetime = 2U;
 
 // Read by the hook, written by the panel.
 inline std::atomic<bool> &SimpleShadowEnabled() noexcept {
@@ -206,8 +208,11 @@ public:
     }
     if (!enabled || !compiled) return std::nullopt;
     const auto actor = ReadSimpleShadowActor(memory, state.r[0]);
-    if (!actor) return std::nullopt;
+    if (!actor || actor->Id != 0U) return std::nullopt;
+    // Link's decision this step, a refusal included, replaces the last one.
     const auto frame = DecideSimpleShadow(*actor, cutscenes);
+    mFrameAge = 0U;
+    mFrame.reset();
     if (!frame || !memory.Write8(actor->Address + kSimpleShadowAlphaOffset, 0U)) return std::nullopt;
     mFrame = frame;
     mActor = actor->Address;
@@ -226,9 +231,18 @@ public:
     mFeetPending = false;
     mFrame.reset();
   }
-  // The shadow decided since the last call (nothing: none).
-  [[nodiscard]] std::optional<Fast::Oot3d::PlayerShadowFrame> TakeFrame() noexcept {
-    return std::exchange(mFrame, std::nullopt);
+  // The shadow of Link's latest decision, for a completed frame (nothing:
+  // none). Logs39: taking it once left about one completed frame in three
+  // with nothing, because the hook had not run again since the frame before
+  // it (two frames finished in one host step, or the next step's draw came
+  // first), so the game's foot spots flashed in the body shadow's place. A
+  // decision serves until the next one, and no longer than
+  // kSimpleShadowFrameLifetime frames without Link drawn (first person, a
+  // new scene).
+  [[nodiscard]] std::optional<Fast::Oot3d::PlayerShadowFrame> FrameForPublish() noexcept {
+    if (mFrameAge >= kSimpleShadowFrameLifetime) return std::nullopt;
+    ++mFrameAge;
+    return mFrame;
   }
   [[nodiscard]] std::uint64_t ShadowFrames() const noexcept { return mShadowFrames; }
 
@@ -239,6 +253,7 @@ private:
   std::uint32_t mCaller = 0U;
   std::array<std::uint32_t, 3> mArguments{}; // actor, lights, play
   std::optional<Fast::Oot3d::PlayerShadowFrame> mFrame;
+  std::uint32_t mFrameAge = kSimpleShadowFrameLifetime;
   std::uint64_t mShadowFrames = 0U;
 };
 
