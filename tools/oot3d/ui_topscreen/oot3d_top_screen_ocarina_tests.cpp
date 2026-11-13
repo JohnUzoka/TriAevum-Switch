@@ -11,7 +11,8 @@ namespace {
 void Require(bool condition, const char *message) {
   if (!condition) { std::cerr << "TopScreen ocarina: " << message << '\n'; std::exit(1); }
 }
-constexpr std::uint32_t kStaffNoteSlots = 0x005C1878U + 0x44U + 0x954U;
+constexpr std::uint32_t kMessageContext = 0x005C1878U;
+constexpr std::uint32_t kStaffNoteSlots = kMessageContext + 0x44U + 0x954U;
 Oot3dNativeGame::NativeA32Memory BuildOcarinaFixture() {
   using namespace Oot3dNativeGame;
   NativeA32Memory memory;
@@ -24,12 +25,19 @@ Oot3dNativeGame::NativeA32Memory BuildOcarinaFixture() {
                             {}},
                            &error),
           "could not map ocarina fixture");
-  // The message context's ocarina staff (0x005C1878 + 0x44): the game
-  // empties its eight note slots (+0x954, stride 8) when the ocarina starts.
-  Require(memory.MapRegion({"topscreen-ocarina-staff", 0x005C2000U, 0x1000U,
+  // The message context (play + 0x32C0) as free play leaves it: open, in
+  // box state 3, but +0xD cleared, so 0x0042CBCC draws no box. The game
+  // empties the eight staff note slots (+0x44 + 0x954, stride 8) when the
+  // ocarina starts.
+  Require(memory.MapRegion({"topscreen-ocarina-message", 0x005C1000U, 0x2000U,
                             true, false, {}},
                            &error),
-          "could not map ocarina staff fixture");
+          "could not map ocarina message fixture");
+  Require(memory.Write8(kMessageContext + 0xCU, 1U) &&
+              memory.Write8(kMessageContext + 0xDU, 0U) &&
+              memory.Write8(kMessageContext + 0xEU, 1U) &&
+              memory.Write8(kMessageContext + 0xF38U, 3U),
+          "could not seed the free-play message context");
   for (std::uint32_t slot = 0U; slot < 8U; ++slot) {
     Require(memory.Write32(kStaffNoteSlots + slot * 8U, 0xFFU),
             "could not seed an empty ocarina staff");
@@ -212,31 +220,57 @@ void RunTopScreenOcarinaTests() {
               unknown.uv.width == 54.0F / 512 && unknown.uv.height == 24.0F / 512,
           "unknown-song marker must use native ItemIcons, not the custom menu");
 
-  // Notes played into the game's staff: the song menu yields (no graphics,
-  // no browsing, no guide toggle) until the game empties the staff again.
+  // Notes played into the staff of the game's ocarina box: the song menu
+  // yields (no graphics, no browsing, no guide toggle) until the game
+  // empties the staff again. Free play draws no box and keeps the menu.
   {
     auto staffMemory = BuildOcarinaFixture();
     TopScreenOcarinaBrowser staffBrowser;
     TopScreenOcarinaState staffState;
     TopScreenOcarinaGeometry staffGeometry;
-    Require(ReadTopScreenOcarinaState(staffMemory, &staffState) &&
-                staffState.Active && !staffState.StaffNotes &&
-                ReadTopScreenOcarinaGeometry(staffMemory, staffBrowser,
-                                             &staffGeometry, &ocarinaError) &&
-                staffGeometry.Active && staffGeometry.Quads[6].Visible,
-            "free play with an empty staff must show the song menu");
+    const auto menuShown = [&] {
+      return ReadTopScreenOcarinaState(staffMemory, &staffState) &&
+             staffState.Active && !staffState.StaffNotes &&
+             ReadTopScreenOcarinaGeometry(staffMemory, staffBrowser,
+                                          &staffGeometry, &ocarinaError) &&
+             staffGeometry.Active && staffGeometry.Quads[6].Visible;
+    };
+    const auto menuYields = [&] {
+      return ReadTopScreenOcarinaState(staffMemory, &staffState) &&
+             staffState.Active && staffState.StaffNotes &&
+             ReadTopScreenOcarinaGeometry(staffMemory, staffBrowser,
+                                          &staffGeometry, &ocarinaError) &&
+             !staffGeometry.Active;
+    };
+    Require(menuShown(), "free play with an empty staff must show the song menu");
+    Require(staffMemory.Write32(kStaffNoteSlots, 0U) &&
+                staffMemory.Write32(kStaffNoteSlots + 7U * 8U, 4U) && menuShown(),
+            "free play hid the song menu for notes the game draws in no box");
+    Require(staffMemory.Write32(kStaffNoteSlots, 0xFFU) &&
+                staffMemory.Write32(kStaffNoteSlots + 7U * 8U, 0xFFU) &&
+                staffMemory.Write8(kMessageContext + 0xDU, 1U) && menuShown(),
+            "the game's ocarina box with an empty staff must show the song menu");
     // Button 0 is a real note; 0xFF alone marks an empty slot.
     for (const auto [slot, note] : {std::pair{0U, 0U}, std::pair{7U, 4U}}) {
-      Require(staffMemory.Write32(kStaffNoteSlots + slot * 8U, note) &&
-                  ReadTopScreenOcarinaState(staffMemory, &staffState) &&
-                  staffState.Active && staffState.StaffNotes &&
-                  ReadTopScreenOcarinaGeometry(staffMemory, staffBrowser,
-                                               &staffGeometry, &ocarinaError) &&
-                  !staffGeometry.Active,
-              "the song menu overlapped notes played into the game's staff");
+      Require(staffMemory.Write32(kStaffNoteSlots + slot * 8U, note) && menuYields(),
+              "the song menu overlapped notes played into the game's ocarina box");
       Require(staffMemory.Write32(kStaffNoteSlots + slot * 8U, 0xFFU),
               "could not empty the ocarina staff");
     }
+    // 0x0042CBCC draws no box in states 0, 1, 0xE, 0xF or without +0xC/+0xE.
+    Require(staffMemory.Write32(kStaffNoteSlots, 2U) && menuYields(),
+            "the song menu overlapped a note in the game's ocarina box");
+    for (const std::uint8_t boxState : {0, 1, 0xE, 0xF}) {
+      Require(staffMemory.Write8(kMessageContext + 0xF38U, boxState) && menuShown(),
+              "the song menu yielded to a box the game does not draw");
+    }
+    Require(staffMemory.Write8(kMessageContext + 0xF38U, 3U) &&
+                staffMemory.Write8(kMessageContext + 0xEU, 0U) && menuShown() &&
+                staffMemory.Write8(kMessageContext + 0xEU, 1U) &&
+                staffMemory.Write8(kMessageContext + 0xCU, 0U) && menuShown() &&
+                staffMemory.Write8(kMessageContext + 0xCU, 1U) && menuYields() &&
+                staffMemory.Write32(kStaffNoteSlots, 0xFFU),
+            "the song menu ignored the native box draw gate");
     const TopScreenOcarinaState playing{true, 12, 0, true};
     staffBrowser.Advance(playing, false, true, false, true, true);
     Require(staffBrowser.SelectedSong() == -2 && !staffBrowser.GuideHidden() &&

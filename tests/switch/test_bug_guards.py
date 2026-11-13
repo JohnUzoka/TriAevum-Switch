@@ -2820,9 +2820,12 @@ GUARDS = [
           "tools/oot3d/native_game_runtime/oot3d_native_game.cpp",
           r'const_cast<char\*>\("--save-data"\),\s+const_cast<char\*>\("sdmc:/switch/oot3dre/savedata"\)'),
     Guard("the song menu overlapped the notes played into the game's ocarina staff (0.2.4 player report): "
-          "it yields while the message context's staff holds a note and returns when the game empties it",
+          "it yields only while the game draws its ocarina box (not in free play) and the staff holds a note",
           "tools/oot3d/ui_topscreen/oot3d_top_screen_ocarina.cpp",
-          r'kStaffNoteSlots = 0x005C1878U \+ 0x44U \+ 0x954U;.*?state->StaffNotes = note != 0xFFU;.*?'
+          r'kMessageContext = 0x005C1878U;.*?'
+          r'Read8\(kMessageContext \+ 0xDU, &shown\).*?Read8\(kMessageContext \+ 0xF38U, &boxState\).*?'
+          r'if \(!open \|\| !shown \|\| !visible \|\| boxState == 0U \|\| boxState == 1U \|\|\s+boxState == 0xEU \|\| boxState == 0xFU\) return true;.*?'
+          r'kStaffNoteSlots = kMessageContext \+ 0x44U \+ 0x954U;.*?state->StaffNotes = note != 0xFFU;.*?'
           r'if \(!state\.Active \|\| state\.StaffNotes\) return;.*?'
           r'if \(!state\.Active \|\| state\.StaffNotes \|\| browser\.GuideHidden\(\)\) return true;',
           "oot3d_top_screen_mod_profile_tests (oot3d_top_screen_ocarina_tests.cpp)"),

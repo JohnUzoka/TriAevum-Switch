@@ -43,13 +43,27 @@ bool ReadTopScreenOcarinaState(NativeA32Memory &memory,
   state->CursorSong = column < 4 && row < 3 ? column + row * 4 : 11;
   state->Active = !suppressed && state->Page != 0 && transition == 0 && mode == 3;
   if (!state->Active) return true;
-  // The message context 0x005C1878 owns the staff of the ocarina box; its
-  // staff object (+0x44) keeps the played notes in eight slots at +0x954
-  // (stride 8, 0xFF = empty). 0x00494DE0 fills one per note played
+  // The message context 0x005C1878 (play + 0x32C0) draws its box on the
+  // upper screen through 0x0042CBCC, which skips it unless +0xC, +0xD and
+  // +0xE are set and its box state +0xF38 is not 0, 1, 0xE or 0xF (0 is
+  // closed, 0xE is set as the box closes). The ocarina start (0x00343BCC)
+  // clears +0xD for free play (action 1) and actions 0x2F/0x30: no box is
+  // drawn, yet the staff still fills (the 3DS shows free play on the lower
+  // screen), and the menu stays.
+  constexpr std::uint32_t kMessageContext = 0x005C1878U;
+  std::uint8_t open = 0, shown = 0, visible = 0, boxState = 0;
+  if (!memory.Read8(kMessageContext + 0xCU, &open) ||
+      !memory.Read8(kMessageContext + 0xDU, &shown) ||
+      !memory.Read8(kMessageContext + 0xEU, &visible) ||
+      !memory.Read8(kMessageContext + 0xF38U, &boxState)) return false;
+  if (!open || !shown || !visible || boxState == 0U || boxState == 1U ||
+      boxState == 0xEU || boxState == 0xFU) return true;
+  // Its staff object (+0x44) keeps the played notes in eight slots at
+  // +0x954 (stride 8, 0xFF = empty). 0x00494DE0 fills one per note played
   // (0x002D038C, called by the message update at 0x00474270);
   // 0x002C0CA4 empties all eight once the notes have dropped (0x00474B74)
   // and at every ocarina start (0x0033F2D8), as does closing the box.
-  constexpr std::uint32_t kStaffNoteSlots = 0x005C1878U + 0x44U + 0x954U;
+  constexpr std::uint32_t kStaffNoteSlots = kMessageContext + 0x44U + 0x954U;
   for (std::uint32_t slot = 0; slot < 8U && !state->StaffNotes; ++slot) {
     std::uint32_t note = 0;
     if (!memory.Read32(kStaffNoteSlots + slot * 8U, &note)) return false;

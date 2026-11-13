@@ -1008,23 +1008,34 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we
   should have one or the other". In the clip the menu's white preview notes and the notes the
   player plays share the staff of the "Play with ..." box, column for column, until the played
-  notes drop.
+  notes drop. After the first fix (0.2.5-test.1..3): "the ocarina menu disappears even when there's
+  no dialogue box" (free play).
 - **Cause:** the menu draws its notes at 122 + 24n, the columns of the game's own staff (native
   `0x002F67D4` uses 0x52 + 24n, +40 in the port). 3.2.2 does the same: its melody draw
-  (`0x005E2D70`) and browser (`0x005D7574`) never read the game's staff, so it overlaps there too.
-- **Fix (port rule, not 3.2.2's):** the menu (bands, notes, markers, arrows, title) yields while
-  the game's staff holds a played note and returns when the game empties it. The staff belongs
-  to the message context `0x005C1878` (staff at +0x44): eight slots at +0x954, stride 8, 0xFF
-  empty. `0x00494DE0` fills one per note (`0x002D038C`, from the message update at `0x00474270`);
-  `0x002C0CA4` empties them after the notes drop (`0x00474B74`) and at every ocarina start
-  (`0x0033F2D8`), as does closing the box. `TopScreenOcarinaState::StaffNotes`; while it is set
-  the menu does not browse or toggle, and the ocarina keeps the D-pad. The other hide rules
-  (`ReadTopScreenOcarinaUiActive`, `0x005CD63C`) are unchanged. Played notes stay until eight
-  have dropped, a song is recognised or the ocarina closes, and the menu stays hidden that long.
-- **Test:** `oot3d_top_screen_mod_profile_tests` (`oot3d_top_screen_ocarina_tests.cpp`: empty
-  staff shows the menu; a note in slot 0 or 7 hides it; no browsing or toggle while hidden; it
-  returns when the slots are empty again). Console check: free play, a few notes (menu hides),
-  eight wrong notes (menu returns after the drop), B and reopen, a recognised song.
+  (`0x005E2D70`) and browser (`0x005D7574`) never read the game's staff. The first fix hid the
+  menu whenever the staff held a note, but the staff fills in free play too, where no box is
+  drawn.
+- **Fix (port rule, not 3.2.2's):** the menu (bands, notes, markers, arrows, title) yields only
+  while the game draws its ocarina box on the upper screen and that box's staff holds a played
+  note; it returns when the game empties the staff or the box goes away. The message context
+  `0x005C1878` (play + 0x32C0) draws the box through `0x0042CBCC`, only with +0xC, +0xD and +0xE
+  set and the box state +0xF38 not 0, 1, 0xE or 0xF; the ocarina start (`0x00343BCC`) clears +0xD
+  for free play (action 1) and actions 0x2F/0x30 and sets it for the others (ocarina spots, NPC
+  prompts, lessons). The staff (+0x44) keeps the played notes in eight slots at +0x954 (stride 8,
+  0xFF empty): `0x00494DE0` fills one per note (`0x002D038C`, from `0x00474270`), `0x002C0CA4`
+  empties them once the notes drop (`0x00474B74`) and at every ocarina start (`0x0033F2D8`).
+  `TopScreenOcarinaState::StaffNotes`; while it is set the menu does not browse or toggle, and the
+  ocarina keeps the D-pad. The other hide rules (`ReadTopScreenOcarinaUiActive`, `0x005CD63C`)
+  are unchanged. In the box, played notes stay until eight have dropped, a song is recognised or
+  the ocarina closes, and the menu stays hidden that long. (Addresses from the 3.2.2 EUR code by
+  disassembly; the meaning of +0xC/+0xE and box states 1/0xF is copied from the draw rule, not
+  understood.)
+- **Test:** `oot3d_top_screen_mod_profile_tests` (`oot3d_top_screen_ocarina_tests.cpp`: free play
+  with or without notes shows the menu; the box with an empty staff shows it; the box with a note
+  in slot 0 or 7 hides it; box states 0, 1, 0xE, 0xF and a cleared +0xC/+0xE keep it; no browsing
+  or toggle while hidden; it returns when the slots are empty again). Console check: free play,
+  a few notes (menu stays); an ocarina spot or NPC prompt, a few notes (menu hides), eight wrong
+  notes (menu returns after the drop), B and reopen, a recognised song.
 
 ### Message button icons: ZL/ZR for the game's L/R (user, 0.2.4, 11/13)
 - **Seen:** "our dialogue boxes around the game still say L instead of ZL" (screenshot
