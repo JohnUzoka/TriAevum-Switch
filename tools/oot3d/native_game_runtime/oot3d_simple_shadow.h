@@ -21,6 +21,7 @@
 // The rules are plain code, tested on the host (oot3d_simple_shadow_tests).
 
 #include "fast/oot3d/player_shadow.h"
+#include "oot3d_native_area.h"
 #include "recomp/a32_runtime.h"
 
 #include <array>
@@ -211,7 +212,9 @@ public:
     const auto actor = ReadSimpleShadowActor(memory, state.r[0]);
     if (!actor || actor->Id != 0U) return std::nullopt;
     // Link's decision this step, a refusal included, replaces the last one.
-    const auto frame = DecideSimpleShadow(*actor, cutscenes);
+    auto frame = DecideSimpleShadow(*actor, cutscenes);
+    // The scene names its translucent floor (PlayerShadowTranslucentFloorOf).
+    if (frame) frame->Scene = ReadNativeArea(memory).Scene;
     mFrameAge = 0U;
     mFrame.reset();
     if (!frame || !memory.Write8(actor->Address + kSimpleShadowAlphaOffset, 0U)) return std::nullopt;

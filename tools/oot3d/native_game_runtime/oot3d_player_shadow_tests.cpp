@@ -190,6 +190,47 @@ void TestDecal() {
                               pixel({beside[0], beside[1], beside[2] + 0.3F}));
   Require(bootFacing && !PlayerShadowDecalLookup(*decal, beside, *bootFacing).has_value(),
           "decal: an upright surface there is his: none");
+
+  // 0.2.5-test.4 (user): in the Temple of Time the shadow lay on the carpet
+  // only. Its marble is drawn translucent without depth over mirrored walls,
+  // so the scene's depth there is far under the floor.
+  Require(!decal->Floor, "decal: a scene without a translucent floor");
+  PlayerShadowFrame temple = frame;
+  temple.Scene = 0x43;
+  auto glass = PlayerShadowDecalOf(temple, *region, light, worldToClip);
+  Require(glass && glass->Floor && glass->Floor->Height == -40.0F, "decal: the Temple of Time's marble at y -40");
+  const auto eyeClip = Apply4(worldToClip, glass->Eye);
+  Require(Near(eyeClip[0], 0.0F, 1.0e-3F) && Near(eyeClip[1], 0.0F, 1.0e-3F) && Near(eyeClip[3], 0.0F, 1.0e-3F),
+          "decal: the camera, where the clip's x, y and w are 0");
+  PlayerShadowFrame courtyard = frame;
+  courtyard.Scene = 0x23;
+  const auto camera = PlayerShadowDecalOf(courtyard, *region, light, worldToClip);
+  Require(camera && !camera->Floor, "decal: a camera under the floor (the courtyard's at y 60) takes none");
+  glass->Floor = PlayerShadowTranslucentFloor{0.0F, {-100.0F, 100.0F}, {-100.0F, 100.0F}};
+  const Vec3 &eye = glass->Eye;
+  const Vec3 marble{-20.0F, 0.0F, -10.0F};
+  Vec3 mirrored{};
+  for (size_t axis = 0; axis < 3U; ++axis) mirrored[axis] = eye[axis] + (marble[axis] - eye[axis]) * 50.0F;
+  const auto shown = pixel(mirrored);
+  const auto onMarble = PlayerShadowDecalReceiverAt(*glass, shown[0], shown[1], shown[2]);
+  Require(onMarble && onMarble->OnFloor && Near(onMarble->Point, marble, 1.0e-2F),
+          "decal: under the marble, its point is the receiver");
+  Require(PlayerShadowDecalLookup(*glass, onMarble->Point, up).has_value(), "decal: the marble takes the shadow");
+  Require(!PlayerShadowDecalLookup(*glass, mirrored, up).has_value(), "decal: what it shows lay out of range");
+  const auto carpet = PlayerShadowDecalReceiverAt(*glass, pixel(marble)[0], pixel(marble)[1], pixel(marble)[2]);
+  Require(carpet && !carpet->OnFloor && Near(carpet->Point, marble, 1.0e-2F),
+          "decal: the carpet, which writes depth, is its own point");
+  const Vec3 stone{-40.0F, 30.0F, -10.0F};
+  const auto onStone = PlayerShadowDecalReceiverAt(*glass, pixel(stone)[0], pixel(stone)[1], pixel(stone)[2]);
+  Require(onStone && !onStone->OnFloor && Near(onStone->Point, stone, 1.0e-2F),
+          "decal: a point above the floor is its own");
+  auto beyond = *glass;
+  beyond.Floor->X = {50.0F, 100.0F};
+  const auto ledge = PlayerShadowDecalReceiverAt(beyond, shown[0], shown[1], shown[2]);
+  Require(ledge && !ledge->OnFloor && Near(ledge->Point, mirrored, 0.5F),
+          "decal: outside the floor's box, the scene's point (past a ledge: none)");
+  Require(!PlayerShadowDecalReceiverAt(*decal, shown[0], shown[1], 1.0F).has_value(),
+          "decal: nothing drawn (depth 1) and no floor: nothing");
 }
 
 void TestProjection() {

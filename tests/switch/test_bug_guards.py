@@ -2904,14 +2904,40 @@ GUARDS = [
           "6 above the collision floor (his balcony's planks 1.08) fell in his 'not Link' cylinder; an "
           "up-facing receiver there is the floor",
           "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
-          r'float depth_dx = dFdx\(depth\);\s+float depth_dy = dFdy\(depth\);\s+if \(depth >= 1\.0\) discard;.*?'
-          r'dot\(sideways, sideways\) < link\.w \* link\.w &&\s+!raised_floor\(p, up, vec2\(x, y\), depth, depth_dx, depth_dy\) && up > 1\.0 && up < middle\.w\) discard;',
+          r'float depth_dx = dFdx\(depth\);\s+float depth_dy = dFdy\(depth\);.*?'
+          r'dot\(sideways, sideways\) < link\.w \* link\.w &&\s+!raised_floor\(p, up, on_floor, vec2\(x, y\), depth, depth_dx, depth_dy\) && up > 1\.0 && up < middle\.w\) discard;',
           "oot3d_player_shadow_tests (TestDecal)"),
     Guard("the decal's raised floor: its height and facing reach the shader",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
           r'put\(block\.TowardLight, decal->TowardLight, Oot3d::kPlayerShadowDecalFloorFacing\);.*?'
           r'block\.Shade\[3\] = Oot3d::kPlayerShadowDecalFloorRelief;',
           "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.5-test.4 (user): in the Temple of Time the shadow lay on the carpet only: the marble is drawn without "
+          "depth over mirrored walls; where the ray crosses the scene's translucent floor before its point, the floor "
+          "is the receiver, before the height range and the nothing-drawn discard",
+          "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
+          r'vec4 world = clip_to_world \* vec4\(x, y, -depth, 1\.0\);.*?'
+          r'if \(p\.y < eye\.w - 1\.0\) \{\s+vec3 hit = mix\(eye\.xyz, p, \(eye\.y - eye\.w\) / \(eye\.y - p\.y\)\);\s+'
+          r'if \(hit\.x >= floor_box\.x && hit\.x <= floor_box\.y && hit\.z >= floor_box\.z && hit\.z <= floor_box\.w\) \{\s+'
+          r'p = vec3\(hit\.x, eye\.w, hit\.z\);\s+on_floor = true;.*?'
+          r'if \(!on_floor && depth >= 1\.0\) discard;.*?'
+          r'if \(height < extent\.z \|\| height > extent\.w\) discard;',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.5-test.4: the translucent floor and the camera reach the decal's uniforms (none: the lowest height)",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
+          r'float Eye\[4\];.*?float FloorBox\[4\];.*?sizeof\(PlayerShadowDecalUniforms\) == 256U.*?'
+          r'if \(decal->Floor\) \{\s+put\(block\.Eye, decal->Eye, decal->Floor->Height\);.*?block\.FloorBox\[3\] = decal->Floor->Z\[1\];.*?'
+          r'put\(block\.Eye, decal->Eye, std::numeric_limits<float>::lowest\(\)\);',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.5-test.4: the Temple of Time's marble (tokinoma, y -40) is a translucent floor, taken only with the camera above it",
+          "runtime/three_ds_recomp/include/fast/oot3d/player_shadow.h",
+          r'case 0x43:[^\n]*\n\s+return PlayerShadowTranslucentFloor\{-40\.0F, \{-640\.1F, 640\.1F\}, \{1119\.3F, 2399\.3F\}\};.*?'
+          r'if \(Finite\(decal\.Eye\) && decal\.Eye\[1\] > floor->Height\) decal\.Floor = floor;',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.5-test.4: the shadow frame names the game's scene (its translucent floor)",
+          "tools/oot3d/native_game_runtime/oot3d_simple_shadow.h",
+          r'auto frame = DecideSimpleShadow\(\*actor, cutscenes\);\s+(//[^\n]*\n\s+)*if \(frame\) frame->Scene = ReadNativeArea\(memory\)\.Scene;',
+          "oot3d_simple_shadow_tests (TestScene)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -47,8 +48,10 @@ struct PlayerShadowDecalUniforms {
     float Link[4];         // w: his radius
     float Middle[4];       // w: his height
     float Shade[4];        // opacity, one texel, the fade's length, the raised floor's height
+    float Eye[4];          // the camera; w: the translucent floor's height (none: lowest float)
+    float FloorBox[4];     // the translucent floor's lowest x, highest x, lowest z, highest z
 };
-static_assert(sizeof(PlayerShadowDecalUniforms) == 224U, "the std140 block PlayerShadowDecal");
+static_assert(sizeof(PlayerShadowDecalUniforms) == 256U, "the std140 block PlayerShadowDecal");
 
 // The pixels both rectangles hold (none: zero width).
 DkScissor Intersect(const DkScissor& a, const DkScissor& b) {
@@ -338,6 +341,17 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     block.Shade[1] = 1.0F / static_cast<float>(kPlayerShadowSilhouetteSize);
     block.Shade[2] = Oot3d::kPlayerShadowDecalFade;
     block.Shade[3] = Oot3d::kPlayerShadowDecalFloorRelief;
+    // The scene's translucent floor (the Temple of Time's marble); none: no
+    // point is under the lowest height.
+    if (decal->Floor) {
+        put(block.Eye, decal->Eye, decal->Floor->Height);
+        block.FloorBox[0] = decal->Floor->X[0];
+        block.FloorBox[1] = decal->Floor->X[1];
+        block.FloorBox[2] = decal->Floor->Z[0];
+        block.FloorBox[3] = decal->Floor->Z[1];
+    } else {
+        put(block.Eye, decal->Eye, std::numeric_limits<float>::lowest());
+    }
     const uint32_t blockBytes = AlignUp(static_cast<uint32_t>(sizeof(block)), DK_UNIFORM_BUF_ALIGNMENT);
     const StreamSpan uniforms = mDevice.Stream(blockBytes, DK_UNIFORM_BUF_ALIGNMENT);
     if (uniforms.Cpu == nullptr) return;

@@ -163,6 +163,7 @@ void TestHook() {
   Require(memory.Read8(kLink + kSimpleShadowAlphaOffset, &alpha) && alpha == 255U, "the alpha back");
   const auto frame = runtime.FrameForPublish();
   Require(frame && frame->Actor == kLink && runtime.ShadowFrames() == 1U, "the frame's shadow");
+  Require(frame->Scene == -1, "no play state: no scene");
   // logs39: one completed frame in three had none when each decision was
   // taken once; one serves the frames until the next, at most two.
   Require(runtime.FrameForPublish().has_value() && !runtime.FrameForPublish().has_value(),
@@ -229,6 +230,25 @@ void TestHook() {
   Require(!runtime.Pending() && !runtime.FrameForPublish().has_value(), "a state load resets it");
 }
 
+// 0.2.5-test.4 (user): the Temple of Time's marble is drawn without depth; the
+// frame names the scene, whose translucent floor the decal takes.
+void TestScene() {
+  constexpr std::uint32_t kPlay = 0x08001000U;
+  FakeMemory memory;
+  PutLink(memory, Standing());
+  memory.Put32(kNativeGameStatePointer, kPlay);
+  memory.Put8(kPlay + kNativeGameStateTypeOffset, kNativeGameStatePlay);
+  memory.Put16(kPlay + kNativePlaySceneOffset, 0x43U);
+  SimpleShadowRuntime runtime;
+  oot3d::recomp::a32::GuestState state;
+  state.r[0] = kLink;
+  state.r[14] = kCaller;
+  (void)runtime.Execute(state, memory, true, true, false);
+  const auto frame = runtime.FrameForPublish();
+  Require(frame && frame->Scene == 0x43, "the frame names the Temple of Time");
+  Require(Fast::Oot3d::PlayerShadowTranslucentFloorOf(frame->Scene).has_value(), "whose marble is translucent");
+}
+
 void TestConfig() {
   Require(SimpleShadowEnabled().load() && !SimpleShadowCutscenes().load(),
           "the shadow on by default, in cutscenes off");
@@ -260,6 +280,7 @@ int main() {
   TestDecision();
   TestRead();
   TestHook();
+  TestScene();
   TestConfig();
   std::puts("oot3d_simple_shadow_tests: ok");
   return 0;

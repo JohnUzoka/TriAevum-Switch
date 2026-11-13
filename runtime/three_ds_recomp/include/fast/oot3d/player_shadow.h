@@ -42,6 +42,9 @@ struct PlayerShadowFrame {
     float Height = 0.0F;
     // 0..1.
     float Opacity = 0.0F;
+    // The game's scene (PlayState +0x104), -1 unknown: its translucent floor
+    // (PlayerShadowTranslucentFloorOf).
+    int16_t Scene = -1;
 
     bool operator==(const PlayerShadowFrame&) const = default;
 };
@@ -520,6 +523,38 @@ inline constexpr float kPlayerShadowDecalFloorFacing = 0.9F;
 inline constexpr float kPlayerShadowDecalBelow = 45.0F;
 inline constexpr float kPlayerShadowDecalAbove = 70.0F;
 
+// Floors the game draws translucent without writing depth, over a reflection
+// (RomFS: the room meshes' materials). The Temple of Time's marble (tokinoma,
+// rooms 0 and 1: toki_yuka_01 and toki_yuka_02x at y -40, blended, depth write
+// off; its carpet toki_yuka_04 writes depth) shows mirrored walls and pillars
+// built down to y -1018 under it, or nothing; the courtyard before it (shrine,
+// shrine_n: shr_water_01 at y 60) the mirrored temple front. The scene's depth
+// there is what lies under the floor, out of the decal's range, so the shadow
+// lay on the carpet only (user, 0.2.5-test.4). A survey of every scene's floor
+// (collision normal y over 0.7) against its room meshes found no other floor
+// without a depth-writing surface from 45 below to 5 above it: 31% of
+// tokinoma's floor area, 20% of shrine's and shrine_n's. Where a pixel's ray
+// from the camera above crosses such a floor (its box, world x and z) before
+// the scene's point, more than kPlayerShadowDecalFloorGap under it, the floor
+// is the receiver. Nothing else in those boxes is drawn under the floor.
+struct PlayerShadowTranslucentFloor {
+    float Height = 0.0F;      // world y
+    std::array<float, 2> X{}; // lowest, highest
+    std::array<float, 2> Z{};
+};
+inline constexpr float kPlayerShadowDecalFloorGap = 1.0F;
+[[nodiscard]] inline std::optional<PlayerShadowTranslucentFloor> PlayerShadowTranslucentFloorOf(int16_t scene) noexcept {
+    switch (scene) {
+    case 0x43: // tokinoma: both rooms' marble (room 1's reaches z 1119.3)
+        return PlayerShadowTranslucentFloor{-40.0F, {-640.1F, 640.1F}, {1119.3F, 2399.3F}};
+    case 0x23: // shrine
+    case 0x24: // shrine_n
+        return PlayerShadowTranslucentFloor{60.0F, {697.0F, 2937.0F}, {-1594.0F, -766.0F}};
+    default:
+        return std::nullopt;
+    }
+}
+
 struct PlayerShadowDecal {
     std::array<float, 16> ClipToWorld{}; // row-major
     std::array<float, 3> Origin{};
@@ -534,6 +569,9 @@ struct PlayerShadowDecal {
     float Highest = kPlayerShadowDecalAbove;
     std::array<float, 3> Link{};   // his position
     std::array<float, 3> Middle{}; // the side of him the light comes from is not his shadow
+    // The scene's translucent floor, when the camera (Eye) is above it.
+    std::optional<PlayerShadowTranslucentFloor> Floor;
+    std::array<float, 3> Eye{};
 };
 
 [[nodiscard]] inline std::optional<PlayerShadowDecal> PlayerShadowDecalOf(
@@ -556,6 +594,13 @@ struct PlayerShadowDecal {
     decal.Link = {frame.FloorPoint[0], frame.FloorPoint[1] + frame.Height, frame.FloorPoint[2]};
     for (size_t axis = 0; axis < 3U; ++axis)
         decal.Middle[axis] = decal.Link[axis] + decal.Normal[axis] * kPlayerShadowDecalLinkMiddle;
+    // The camera: the point whose clip has x, y and w at 0 (the third column
+    // of ClipToWorld). Its floor only when it looks down on it.
+    const auto& m = decal.ClipToWorld;
+    if (const auto floor = PlayerShadowTranslucentFloorOf(frame.Scene); floor && std::abs(m[14]) > 1.0e-6F) {
+        decal.Eye = {m[2] / m[14], m[6] / m[14], m[10] / m[14]};
+        if (Finite(decal.Eye) && decal.Eye[1] > floor->Height) decal.Floor = floor;
+    }
     return decal;
 }
 
@@ -570,6 +615,31 @@ struct PlayerShadowDecal {
         world[row] = m[row * 4U] * clip[0] + m[row * 4U + 1U] * clip[1] + m[row * 4U + 2U] * clip[2] + m[row * 4U + 3U];
     if (!(std::abs(world[3]) > 1.0e-6F)) return std::nullopt;
     return std::array<float, 3>{world[0] / world[3], world[1] / world[3], world[2] / world[3]};
+}
+
+// What the decal darkens at a pixel: the scene's point at its depth, unless
+// the ray from the camera crosses the scene's translucent floor (decal.Floor)
+// before it, more than kPlayerShadowDecalFloorGap above it: then that floor's
+// point (OnFloor; it faces up). Nothing where the scene drew nothing (depth 1)
+// and no floor is there.
+struct PlayerShadowDecalReceiver {
+    std::array<float, 3> Point{};
+    bool OnFloor = false;
+};
+[[nodiscard]] inline std::optional<PlayerShadowDecalReceiver> PlayerShadowDecalReceiverAt(
+    const PlayerShadowDecal& decal, float x, float y, float depth) noexcept {
+    const auto point = PlayerShadowDecalWorldPoint(decal, x, y, depth);
+    if (!point) return std::nullopt;
+    if (decal.Floor && (*point)[1] < decal.Floor->Height - kPlayerShadowDecalFloorGap) {
+        const auto& floor = *decal.Floor;
+        const float t = (decal.Eye[1] - floor.Height) / (decal.Eye[1] - (*point)[1]);
+        const std::array<float, 3> hit{decal.Eye[0] + ((*point)[0] - decal.Eye[0]) * t, floor.Height,
+                                       decal.Eye[2] + ((*point)[2] - decal.Eye[2]) * t};
+        if (hit[0] >= floor.X[0] && hit[0] <= floor.X[1] && hit[2] >= floor.Z[0] && hit[2] <= floor.Z[1])
+            return PlayerShadowDecalReceiver{hit, true};
+    }
+    if (!(depth < 1.0F)) return std::nullopt;
+    return PlayerShadowDecalReceiver{*point, false};
 }
 
 // A receiver's surface (not unit, either sign) from its pixel and the next

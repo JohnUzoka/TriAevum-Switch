@@ -1025,6 +1025,30 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   surfaces there, the facing from neighbouring pixels); its TestScreenRect expectations follow the radius 45.
   Console check: the balcony and the Zora's Fountain ledge, the shadow reaching his boots; `shadow_decal_ms`.
 
+### Simple shadow: the Temple of Time's marble had none (user, 0.2.5-test.4, 11/13)
+- **Seen:** "in the Temple of Time Link's shadow is not showing on the floor, only the carpet" (no clip; logs48 has
+  scene 0x43 rooms 0 and 1).
+- **Cause:** the marble is drawn translucent without writing depth (tokinoma rooms 0 and 1: `toki_yuka_01` and
+  `toki_yuka_02x` at y -40, blended, depth write off) over a reflection built as geometry: walls, pillars, glass
+  and altar mirrored down to y -1018. The carpet (`toki_yuka_04`, y -40) writes depth. The decal takes each
+  pixel's point from the scene's depth, which under the marble is the mirrored geometry far below or nothing,
+  out of its range (45 below the plane). RomFS survey of every scene's floor (collision normal y over 0.7)
+  against its room meshes: floor with no depth-writing surface from 45 below to 5 above it is 31% of
+  tokinoma's area and 20% of the courtyard before it (shrine, shrine_n: `shr_water_01` at y 60 over the mirrored
+  temple front); no other scene over 0.5%. Not the draw point, not a second pass, not the cylinder (the marble is
+  1 under his collision floor).
+- **Fix:** the shadow frame names the game's scene (PlayState +0x104, `ReadNativeArea`);
+  `PlayerShadowTranslucentFloorOf` gives those floors (height, box in world x and z). With the camera above it,
+  a pixel whose scene point is more than 1 under that floor and whose ray crosses it inside the box takes the
+  floor's point (`PlayerShadowDecalReceiverAt`, the shader the same; it faces up for the raised-floor rule), also
+  where the scene drew nothing (depth 1). Elsewhere nothing changes; the shadow still ends past a ledge. No draw
+  or pass is added; DKSH 3328 -> 3840 B, uniforms 224 -> 256 B. General alternatives (a stencil bit for
+  translucent room draws, a depth-only re-draw, forcing depth writes) cost more or change the game's rendering.
+- **Test:** `oot3d_player_shadow_tests` (TestDecal: the marble, the carpet, outside the box, a camera under the
+  floor, nothing drawn), `oot3d_simple_shadow_tests` (TestScene). Console check: Temple of Time, Link on the
+  marble beside the carpet and on the steps toward it; the courtyard outside; `shadow_decal_ms` against logs48
+  (0.50-0.67 ms median in tokinoma).
+
 ### Ocarina song menu over the notes being played (user, 11/13)
 - **Seen:** "the ocarina menu overlaps with the dialogue box weirdly, if anything in those cases we
   should have one or the other". In the clip the menu's white preview notes and the notes the
