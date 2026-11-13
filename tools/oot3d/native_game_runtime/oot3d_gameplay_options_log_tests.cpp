@@ -24,7 +24,7 @@ void TestLine() {
   GameplayOptionsLog log;
   const auto start = log.Take();
   Require(Contains(start, "gameplay: quick_put_away=off damage=normal master_quest_unmirrored=off ") &&
-              Contains(start, " simple_shadow=off shadow_cutscenes=off "),
+              Contains(start, " simple_shadow=on shadow_cutscenes=off "),
           "the defaults at start");
   Require(!Contains(start, "applies at the next") && !Contains(start, "shadow_method"),
           "nothing pending at start, and no shadow method (one decal now)");

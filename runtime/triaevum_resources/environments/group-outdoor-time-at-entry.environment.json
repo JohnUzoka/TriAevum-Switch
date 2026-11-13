@@ -78,7 +78,7 @@
       "radiusScale": 1.0
     }
   ],
-  "preserveSceneBrightness": false,
+  "preserveSceneBrightness": true,
   "rimLight": {
     "azimuth": 180.0,
     "color": [

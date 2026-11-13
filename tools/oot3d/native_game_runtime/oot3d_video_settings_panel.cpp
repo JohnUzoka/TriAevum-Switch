@@ -76,7 +76,7 @@ public:
     mGrassLod = Fast::Oot3d::ReadGrassSwitchLod(mConfig);
     mGrassFill = Fast::Oot3d::ReadGrassSwitchFill(mConfig);
 #if defined(__SWITCH__)
-    SimpleShadowEnabled().store(ReadSimpleShadowFlag(mConfig, kSimpleShadowConfigName), std::memory_order_relaxed);
+    SimpleShadowEnabled().store(ReadSimpleShadowEnabled(mConfig), std::memory_order_relaxed);
     SimpleShadowCutscenes().store(ReadSimpleShadowFlag(mConfig, kSimpleShadowCutscenesConfigName),
                                   std::memory_order_relaxed);
 #endif
@@ -312,8 +312,8 @@ private:
     ImGui::TextDisabled("Applies at once. Larger sizes use more memory and GPU time.");
   }
 
-  // config/simple_shadow (oot3d_simple_shadow.h): present = on, applied at
-  // once. Only the deko3d backend draws the body, so only the Switch has it.
+  // config/simple_shadow (oot3d_simple_shadow.h): "off" = off, on by default,
+  // applied at once. Only the deko3d backend draws the body, so only the Switch has it.
   // config/simple_shadow_cutscenes: whether cutscenes keep it, applied at once.
   void DrawSimpleShadow() {
 #if defined(__SWITCH__)
@@ -322,7 +322,7 @@ private:
     if (ImGui::Checkbox("Simple shadow", &simpleShadow)) {
       SimpleShadowEnabled().store(simpleShadow, std::memory_order_relaxed);
       Write(kSimpleShadowConfigName, [config = mConfig, simpleShadow] {
-        return SaveSimpleShadowFlag(config, kSimpleShadowConfigName, simpleShadow);
+        return SaveSimpleShadowEnabled(config, simpleShadow);
       });
     }
     bool cutscenes = SimpleShadowCutscenes().load(std::memory_order_relaxed);
@@ -334,7 +334,7 @@ private:
     }
     for (const char *name : {kSimpleShadowConfigName, kSimpleShadowCutscenesConfigName})
       if (Writer().Failed(name)) ImGui::TextWrapped("Could not write config/%s.", name);
-    ImGui::TextDisabled("Applies at once. Link's whole body casts his shadow along the scene's light, "
+    ImGui::TextDisabled("On by default, applies at once. Link's whole body casts his shadow along the scene's light, "
                         "instead of the two spots under his feet (Single Screen Experience's Simple "
                         "shadows). deko3d renderer only; it costs some GPU time.");
     ImGui::TextDisabled("It lies on whatever is under and behind Link, slopes, steps and walls included, and "

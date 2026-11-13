@@ -1,9 +1,10 @@
 #pragma once
 
-// L3+R3 > Video > "Simple shadow" (config/simple_shadow, present = on; off by
-// default; deko3d only, drawn as a decal on the ground and walls), with
-// "Shadow in cutscenes" (config/simple_shadow_cutscenes, present = on). A
-// config/simple_shadow_method left by 0.2.3 is not read.
+// L3+R3 > Video > "Simple shadow" (config/simple_shadow: "off" = off, absent
+// or anything else = on, so on by default since 0.2.4; deko3d only, drawn as a
+// decal on the ground and walls), with "Shadow in cutscenes"
+// (config/simple_shadow_cutscenes, present = on). A config/simple_shadow_method
+// left by 0.2.3 is not read.
 //
 // Link's shadow is Player_DrawFeetShadow (EUR 0x00297E04), called by
 // Actor_Draw through shape.shadowDraw (0x002D6498, back at 0x002D649C): unless
@@ -61,7 +62,7 @@ inline constexpr std::uint32_t kSimpleShadowFrameLifetime = 2U;
 
 // Read by the hook, written by the panel.
 inline std::atomic<bool> &SimpleShadowEnabled() noexcept {
-  static std::atomic<bool> enabled{false};
+  static std::atomic<bool> enabled{true};
   return enabled;
 }
 inline std::atomic<bool> &SimpleShadowCutscenes() noexcept {
@@ -72,7 +73,28 @@ inline std::atomic<bool> &SimpleShadowCutscenes() noexcept {
 inline constexpr const char *kSimpleShadowConfigName = "simple_shadow";
 inline constexpr const char *kSimpleShadowCutscenesConfigName = "simple_shadow_cutscenes";
 
-// config/simple_shadow and config/simple_shadow_cutscenes: present = on.
+// config/simple_shadow: "off" turns the shadow off; absent, or the empty file
+// 0.2.3 wrote for on, leaves it on.
+inline bool ReadSimpleShadowEnabled(const std::filesystem::path &config) {
+  std::ifstream file(config / kSimpleShadowConfigName);
+  std::string word;
+  return !(file >> word) || word != "off";
+}
+
+// Removes the file (on) or writes "off"; false if that failed.
+inline bool SaveSimpleShadowEnabled(const std::filesystem::path &config, bool on) {
+  std::error_code error;
+  if (on) {
+    std::filesystem::remove(config / kSimpleShadowConfigName, error);
+    return !error;
+  }
+  std::filesystem::create_directories(config, error);
+  std::ofstream file(config / kSimpleShadowConfigName, std::ios::trunc);
+  file << "off\n";
+  return static_cast<bool>(file);
+}
+
+// config/simple_shadow_cutscenes: present = on.
 inline bool ReadSimpleShadowFlag(const std::filesystem::path &config, const char *name) {
   std::error_code error;
   return std::filesystem::exists(config / name, error);

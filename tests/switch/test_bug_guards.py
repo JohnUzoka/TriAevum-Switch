@@ -2469,13 +2469,13 @@ GUARDS = [
           r'for \(const auto &read : kMasterQuestMirrorReads\)\s+'
           r'hooks\.push_back\(\{read\.HookPc, "master_quest_mirror"\}\);',
           "oot3d_native_block_entry_hooks_tests, whole_aot_hook_gates_census"),
-    Guard("Simple shadow: on by default would change the game (off until config/simple_shadow; the body in "
-          "cutscenes off until config/simple_shadow_cutscenes)",
+    Guard("Simple shadow: on by default since 0.2.4 (user 11/13; config/simple_shadow \"off\" turns it off, "
+          "0.2.3's empty file stays on); the body in cutscenes off until config/simple_shadow_cutscenes",
           "tools/oot3d/native_game_runtime/oot3d_simple_shadow.h",
-          r'SimpleShadowEnabled\(\) noexcept \{\s+static std::atomic<bool> enabled\{false\};.*?'
+          r'SimpleShadowEnabled\(\) noexcept \{\s+static std::atomic<bool> enabled\{true\};.*?'
           r'SimpleShadowCutscenes\(\) noexcept \{\s+static std::atomic<bool> cutscenes\{false\};.*?'
-          r'inline bool ReadSimpleShadowFlag\(const std::filesystem::path &config, const char \*name\) \{\s+'
-          r'std::error_code error;\s+return std::filesystem::exists\(config / name, error\);',
+          r'inline bool ReadSimpleShadowEnabled\(const std::filesystem::path &config\) \{.*?'
+          r'return !\(file >> word\) \|\| word != "off";',
           "oot3d_simple_shadow_tests (TestConfig)"),
     Guard("Simple shadow: the foot shadows run at alpha 0 (their floor bookkeeping kept, as in the mod) and "
           "return into the hook, which puts the alpha back",

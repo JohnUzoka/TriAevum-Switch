@@ -230,17 +230,26 @@ void TestHook() {
 }
 
 void TestConfig() {
-  Require(!SimpleShadowEnabled().load() && !SimpleShadowCutscenes().load(), "off by default");
+  Require(SimpleShadowEnabled().load() && !SimpleShadowCutscenes().load(),
+          "the shadow on by default, in cutscenes off");
   const auto config = std::filesystem::temp_directory_path() / "oot3d_simple_shadow_tests";
   std::error_code ignored;
   std::filesystem::remove_all(config, ignored);
-  Require(!ReadSimpleShadowFlag(config, kSimpleShadowConfigName), "no file: off");
-  Require(SaveSimpleShadowFlag(config, kSimpleShadowConfigName, true) &&
-              ReadSimpleShadowFlag(config, kSimpleShadowConfigName),
-          "on writes the file");
-  Require(SaveSimpleShadowFlag(config, kSimpleShadowConfigName, false) &&
-              !ReadSimpleShadowFlag(config, kSimpleShadowConfigName),
-          "off removes it");
+  Require(ReadSimpleShadowEnabled(config), "no file: on");
+  std::filesystem::create_directories(config);
+  { std::ofstream legacy(config / kSimpleShadowConfigName); }
+  Require(ReadSimpleShadowEnabled(config), "0.2.3's empty file (on): on");
+  Require(SaveSimpleShadowEnabled(config, false) && !ReadSimpleShadowEnabled(config), "off writes \"off\"");
+  Require(SaveSimpleShadowEnabled(config, true) && ReadSimpleShadowEnabled(config) &&
+              !std::filesystem::exists(config / kSimpleShadowConfigName),
+          "on removes the file");
+  Require(!ReadSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName), "no cutscenes file: off");
+  Require(SaveSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName, true) &&
+              ReadSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName),
+          "cutscenes on writes the file");
+  Require(SaveSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName, false) &&
+              !ReadSimpleShadowFlag(config, kSimpleShadowCutscenesConfigName),
+          "cutscenes off removes it");
 
   std::filesystem::remove_all(config, ignored);
 }

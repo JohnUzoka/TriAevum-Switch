@@ -985,6 +985,25 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   (no `shadow_method`), `oot3d_simple_shadow_tests`; guards for the decal, its silhouette barriers and the
   overlay draw point.
 
+### 0.2.4 defaults: Simple shadow on, Preserve scene brightness on (user, logs44, 11/13)
+- **Asked:** "you can remove the other shadow options and set shadow on by default also set preserve scene
+  brightness to default for everyone and release". The other shadow options are the methods, already gone
+  since the decal-only change above; "Shadow in cutscenes" stays, off by default.
+- **Simple shadow:** `config/simple_shadow` is `off` = off; absent, empty (what 0.2.3 and the test builds
+  wrote for on) or anything else = on. Turning it off writes `off`, on removes the file. Turning it off
+  before 0.2.4 removed the file, so those players get it on again once.
+- **Preserve scene brightness:** the release defaults in `runtime/triaevum_resources/environments/`
+  (every scene resolves to one of them: the four groups, day and night, and four scene files) have
+  `"preserveSceneBrightness": true`; the per-pixel ambient then keeps the native reference (gain 1)
+  instead of `nativeAmbientStrength`. A profile the player saved in `config/` keeps its own choice.
+  `BaseSceneEnvironmentProfile()` (the editor's starting point, not reached by a shipped scene) is unchanged.
+- **logs44 (0.2.4-test.5):** decal 1.22 ms a frame (max 1.28 ms) at 307 MHz; one photo of the Kokiri
+  treehouse balcony with part of the shadow under the moss on the planks. test.5 drew the decal at the
+  first translucent draw; the overlay draw point above may cover it [not seen on a console]. Left as a
+  known issue at the user's call.
+- **Test:** `oot3d_simple_shadow_tests` (TestConfig: absent and empty = on, `off` = off, on removes the
+  file), `oot3d_gameplay_options_log_tests`; guard "Simple shadow: on by default since 0.2.4 ...".
+
 ### Free camera below the ground in the Forest Temple (user, after 0.2.3, 11/12)
 - **Seen:** "the camera does not stop at the ground sometimes as it does for the walls, it can go
   underground" in the Forest Temple.
@@ -4425,12 +4444,12 @@ Checked against deko3d 0.5.0's source (`source/maxwell/gpu_base.cpp`, `dk_queue.
     Put Away one frame later instead of 30 (a second at 30 Hz).
   - "Unmirrored Master Quest" (`config/master_quest_unmirrored`, present = on): Master Quest's dungeons,
     enemies and switches in the unmirrored world.
-  - "Simple shadow" (`config/simple_shadow`, present = on; **Switch only**: the deko3d backend draws it):
+  - "Simple shadow" (`config/simple_shadow`; since 0.2.4 `off` = off and on otherwise, see "0.2.4 defaults"; **Switch only**: the deko3d backend draws it):
     Link's whole body flattened onto the floor along the scene's light, instead of his two foot spots.
     Since 11/11 it is in L3+R3 > Video, after Grass, with the other renderer options (same file, still off
     by default until it has been seen on a console and its GPU cost measured). Since 11/12 two options
     follow it there: "Shadow method" (`config/simple_shadow_method`, below) and "Shadow in cutscenes"
-    (`config/simple_shadow_cutscenes`, present = on, off by default).
+    (`config/simple_shadow_cutscenes`, present = on, off by default). The methods are gone since 0.2.4.
 - **Damage (EUR code.bin):** every change of Link's health goes through `Health_ChangeBy` (`0x00352DBC`,
   r1 = the change, a sign-extended s16, negative for damage; health in sixteenths of a heart at save context
   +0x44). After its entry the game doubles damage in Master Quest (flag read at `0x00352DCC`) and halves it
