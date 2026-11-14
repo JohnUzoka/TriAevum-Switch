@@ -279,8 +279,9 @@ PollNativeA32Input(Fast::Fast3dWindow &window,
 
 #if defined(__SWITCH__)
   // SDL pad 0 is player 1 plus handheld. Its sensors come from
-  // oot3d_switch_motion.h, which devkitPro's SDL does not report.
-  const auto availableMotion = SwitchMotionAvailableSource();
+  // oot3d_switch_motion.h, which devkitPro's SDL does not report; of a
+  // detached Joy-Con pair, the one of aim.gyro_joycon.
+  const auto availableMotion = SwitchMotionAvailableSource(config.GyroJoyCon);
   if (availableMotion != SwitchMotionSource::None) {
     for (auto &device : selectedController.Devices) {
       if (device.InstanceId == 0) device.HasGyroscope = device.HasAccelerometer = true;
@@ -392,7 +393,9 @@ PollNativeA32Input(Fast::Fast3dWindow &window,
     motionWanted = config.ControllerEnabled && selectedController.InstanceId == 0 &&
         (motionAim || controls.CalibrationStatus().Active);
     switchMotion = PollSwitchMotion(motionWanted, guestRefreshWillConsume || hostGuiVisible);
-    if (switchMotion.SourceChanged) pollingState.VirtualMotion.ResetController();
+    // Same pad, another sensor (or restarted): keep the aim's owner, so the
+    // new sensor aims at once after a gap without one (ResetSensor).
+    if (switchMotion.SourceChanged) pollingState.VirtualMotion.ResetSensor();
     host.ControllerMotion = switchMotion.Motion;
   }
 #endif
@@ -516,7 +519,7 @@ PollNativeA32Input(Fast::Fast3dWindow &window,
            switchMotion.Restarted, physicalAim,
            guestMotion.GyroscopeEnabled.load(std::memory_order_relaxed),
            guestMotion.GyroscopeSamples.load(std::memory_order_relaxed),
-           guestMotion.NonzeroGyroscopeSamples.load(std::memory_order_relaxed)},
+           guestMotion.NonzeroGyroscopeSamples.load(std::memory_order_relaxed), config.GyroJoyCon},
           armTicksToNs(armGetSystemTick()) / 1000U))
     WriteGameLog(std::move(*line));
 #endif

@@ -3081,6 +3081,44 @@ GUARDS = [
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
           r'Fast::Oot3d::SetHostNoticesCovered\(preparationScreen\.CoversFrame\(\)\);\s+gui->StartDraw\(\);',
           "oot3d_host_notice_tests"),
+    # --- 11/13 (player log, 0.2.5): gyro ignored after detaching the Joy-Cons; the left Joy-Con aiming ---
+    Guard("gyro aiming ignored the new sensor after the Joy-Cons were detached or reconnected (player log 11/13: "
+          "physical_aim=0 with valid samples after every hand-over through 'none'): a sensor change of the same "
+          "pad re-aligns the pose but keeps the Automatic aim's owner (ResetController handed it to the mouse)",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
+          r'switchMotion = PollSwitchMotion\(motionWanted, guestRefreshWillConsume \|\| hostGuiVisible\);\s+'
+          r'(//[^\n]*\n\s+)*if \(switchMotion\.SourceChanged\) pollingState\.VirtualMotion\.ResetSensor\(\);',
+          "three_ds_recomp_input_tests (TestSensorChangeKeepsGyroAim)",
+          forbid=r'SourceChanged\) pollingState\.VirtualMotion\.ResetController\(\)'),
+    Guard("gyro ignored after a sensor change: ResetSensor only re-aligns the pose and never touches the "
+          "Automatic aim's owner",
+          "tools/three_ds/input/three_ds_input.cpp",
+          r'void VirtualMotionState::ResetSensor\(\) noexcept \{\s+Composition\.ResetReference\(\);\s+\}',
+          "three_ds_recomp_input_tests (TestSensorChangeKeepsGyroAim)",
+          forbid=r'void VirtualMotionState::ResetSensor\(\) noexcept \{[^}]*AutomaticOwner'),
+    Guard("the aim followed the LEFT Joy-Con whenever the right one dropped for a moment or paired after the left "
+          "one (player log 11/13: 30 s on joy-dual-left, device bits flapping): the chosen Joy-Con of a pair is "
+          "kept and the other one is read only after 3 s without it",
+          "tools/oot3d/native_game_runtime/oot3d_switch_motion.cpp",
+          r'if \(chosen\) return left \? SwitchMotionSource::JoyDualLeft : SwitchMotionSource::JoyDualRight;\s+'
+          r'if \(other && nowMicroseconds - mAwaitingSinceMicroseconds >= FallbackMicroseconds\)',
+          "oot3d_switch_motion_tests (TestSourceSelector)"),
+    Guard("the sensor PollSwitchMotion starts is the selector's pick of this poll (aim.gyro_joycon), not a "
+          "right-else-left choice of its own",
+          "tools/oot3d/native_game_runtime/oot3d_switch_motion.cpp",
+          r'provider\.Available = provider\.Selector\.Select\(ReadDevices\(provider\), joyCon, NowMicroseconds\(\)\);'
+          r'.*?const MotionSource target = wanted && inFocus \? provider\.Available : MotionSource::None;',
+          "oot3d_switch_motion_tests (TestSourceSelector)",
+          forbid=r'IsRightConnected\) != 0\) return MotionSource::JoyDualRight'),
+    Guard("aim.gyro_joycon (which Joy-Con of a detached pair aims) is read from and written to the controls file",
+          "tools/oot3d/native_game_runtime/oot3d_native_control_config.cpp",
+          r'ReadNamedField\(aim, "gyro_joycon", &parsed\.GyroJoyCon,.*?'
+          r'\{"gyro_joycon", NativeGyroJoyConName\(config\.GyroJoyCon\)\}',
+          "oot3d_native_a32_input_tests"),
+    Guard("the input poll picks the motion sensor with the player's gyro Joy-Con",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
+          r'const auto availableMotion = SwitchMotionAvailableSource\(config\.GyroJoyCon\);',
+          "oot3d_switch_motion_tests (TestSourceSelector)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

@@ -10,10 +10,11 @@
 // output). Everything downstream (calibration, aim.source, sensitivity,
 // inversion, the guest HID ring) then treats it like any SDL gyro.
 //
-// Sources, in order of preference:
+// Sources, in order of preference (SwitchMotionSourceSelector):
 //   - player 1 Pro Controller (FullKey);
-//   - player 1 dual Joy-Con pair: the right Joy-Con (the aiming hand), else
-//     the left one if only it is connected;
+//   - player 1 dual Joy-Con pair: the Joy-Con of aim.gyro_joycon (the right
+//     one, the aiming hand, unless the player picks the left one); the other
+//     one only once the chosen one has been disconnected for a while;
 //   - Handheld (the Switch Lite, or Joy-Cons attached to the console).
 // Player 1 comes first so a Pro Controller paired to a Lite wins over the
 // Lite's built-in sensor. A single sideways Joy-Con is not supported: the
@@ -23,6 +24,7 @@
 // (SwitchMotionLog) are pure and tested on the host
 // (oot3d_switch_motion_tests.cpp); only the libnx part is Switch-only.
 
+#include "oot3d_native_control_config.h"
 #include "three_ds_input.h"
 
 #include <array>
@@ -106,6 +108,37 @@ enum class SwitchMotionSource : std::uint8_t { None, FullKey, JoyDualLeft, JoyDu
 // none, fullkey, joy-dual-left, joy-dual-right, handheld.
 [[nodiscard]] const char *SwitchMotionSourceName(SwitchMotionSource source) noexcept;
 
+// What HID reports for player 1 and handheld, as SwitchMotionSourceSelector
+// reads it: a connected device of each supported style; for a dual Joy-Con
+// pair, which of its two Joy-Cons are connected.
+struct SwitchMotionDevices {
+  bool FullKey = false;
+  bool JoyDualLeft = false;
+  bool JoyDualRight = false;
+  bool Handheld = false;
+};
+
+// Picks the sensor in the order of preference above. Of a dual pair the
+// chosen Joy-Con (aim.gyro_joycon) is kept: the other one is read only once
+// the chosen one has been missing for FallbackMicroseconds. In a player's
+// log (11/13) the Joy-Cons of a pair kept dropping and coming back (device
+// bits 0x30, 0x20, 0x30, 0x10, 0x30 within a minute), and detaching the pair
+// connected the left Joy-Con 1.6 s before the right one; each time the right
+// one was missing the sensor moved to the left hand. While the chosen one is
+// awaited no Joy-Con is read (the aim holds its pose).
+class SwitchMotionSourceSelector {
+ public:
+  static constexpr std::uint64_t FallbackMicroseconds = 3'000'000;
+
+  [[nodiscard]] SwitchMotionSource Select(const SwitchMotionDevices &devices, NativeGyroJoyCon joyCon,
+                                          std::uint64_t nowMicroseconds) noexcept;
+
+ private:
+  // The chosen Joy-Con is missing while the other one is connected, since.
+  bool mAwaiting = false;
+  std::uint64_t mAwaitingSinceMicroseconds = 0;
+};
+
 // One input poll as the game log's motion line counts it.
 struct SwitchMotionLogSample {
   // PollSwitchMotion's `wanted`: controller enabled, SDL pad 0 selected and
@@ -130,14 +163,17 @@ struct SwitchMotionLogSample {
   bool GuestGyroscopeEnabled = false;
   std::uint64_t GuestGyroscopeSamples = 0;
   std::uint64_t GuestNonzeroGyroscopeSamples = 0;
+  // aim.gyro_joycon: the Joy-Con of a dual pair the sensor follows.
+  NativeGyroJoyCon GyroJoyCon = NativeGyroJoyCon::Right;
 };
 
 // The game log's "motion:" line. A line at the first poll and whenever the
-// pad, the wanted state, the available or running sensor, the start result
-// or the game's gyro enable change; otherwise one every IntervalMicroseconds
-// while the sensor is wanted or the game's gyro ring moves. Counts cover the
-// polls since the previous line. Game thread only; no allocation unless a
-// line is due.
+// pad, the wanted state, the available or running sensor, the start result,
+// the game's gyro enable or aim.gyro_joycon change; otherwise one every
+// IntervalMicroseconds while the sensor is wanted or the game's gyro ring
+// moves. Counts cover the polls since the previous line, so a change line's
+// counts belong to the state of the line before it. Game thread only; no
+// allocation unless a line is due.
 class SwitchMotionLog {
  public:
   static constexpr std::uint64_t IntervalMicroseconds = 60'000'000;
@@ -153,6 +189,7 @@ class SwitchMotionLog {
     SwitchMotionSource Running = SwitchMotionSource::None;
     std::uint32_t StartResult = 0;
     bool GuestGyroscopeEnabled = false;
+    NativeGyroJoyCon GyroJoyCon = NativeGyroJoyCon::Right;
     bool operator==(const Key &) const = default;
   };
   bool mStarted = false;
@@ -171,8 +208,8 @@ class SwitchMotionLog {
 #if defined(__SWITCH__)
 struct SwitchMotionPoll {
   ThreeDsRecomp::Input::MotionObservation Motion;
-  // The sensor in use changed (or restarted): the caller resets state that
-  // assumed a continuous pose (VirtualMotionState::ResetController).
+  // The sensor in use changed (or restarted): the caller re-aligns the pose
+  // to it (VirtualMotionState::ResetSensor).
   bool SourceChanged = false;
   // For the motion log line (SwitchMotionLogSample).
   SwitchMotionSource Running = SwitchMotionSource::None;
@@ -181,9 +218,11 @@ struct SwitchMotionPoll {
   bool Restarted = false;
 };
 
-// The sensor of player 1 or handheld that PollSwitchMotion would read, None
-// when no supported one is connected. Shared-memory reads only.
-[[nodiscard]] SwitchMotionSource SwitchMotionAvailableSource() noexcept;
+// The sensor of player 1 or handheld this poll reads, None when no supported
+// one is connected (SwitchMotionSourceSelector over HID's shared memory, no
+// IPC). Called once per poll, before PollSwitchMotion, which starts the
+// sensor picked here. Game thread only.
+[[nodiscard]] SwitchMotionSource SwitchMotionAvailableSource(NativeGyroJoyCon joyCon) noexcept;
 
 // Game thread only. `wanted` false stops the sensor (no IMU streaming while
 // nothing uses it). Starts and stops the sensor on device changes, restarts

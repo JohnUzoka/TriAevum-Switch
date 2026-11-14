@@ -864,6 +864,31 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   moving with `guest_nonzero=0`: zero rates reached the game.
 - **Test:** `oot3d_switch_motion_tests` (TestMotionLog).
 
+### Gyro with detached Joy-Cons (player log, 0.2.5, 11/13)
+- **Seen:** the player of the 11/12 gyro report sent `logs/oot3d_native_game.log` (sessions 11/08-11/13; official
+  Joy-Cons detached, also owns NYXI Joy-Cons; `workshop-OOT/logs/gyro-report/`). Reading note: the counts of a
+  `motion:` change line cover the state of the line before it, so `available=joy-dual-left ... samples=0 valid=0`
+  is the `none` window before it.
+- **Gyro ignored after a hand-over:** every sensor change that went through `none` (detaching the pair: handheld,
+  1-2 s of `none`, then a Joy-Con; or a Joy-Con reconnecting) left `physical_aim=0` while the new sensor gave valid
+  samples (10:30 0/196 right; 10:54 0/332; 11:56 0/298; 22:08 0/95 left; 10:50 handheld 0 for 4 minutes);
+  hand-overs without a gap and sessions launched with the Joy-Cons detached aimed on every poll. Cause: in the gap
+  Automatic aim used its virtual pose (`VirtualMotionState::Active`); the next change called `ResetController`,
+  which dropped the controller's ownership, and the owner was re-derived as Mouse from `Active`, so the physical
+  gyro was not read until a button or stick moved. **Fix:** a sensor change of the same pad calls
+  `VirtualMotionState::ResetSensor` (pose re-aligned, owner kept); `ResetController` stays for another pad.
+- **Left hand aiming:** with the right Joy-Con reported gone (`player1_device=0x10`) the sensor moved to the left
+  one: 1.6 s while the pair connected after detaching (left first), and 30.6 s at 22:09:50 (the pair's device
+  bits changed 8 times in 38 s). **Fix:** `SwitchMotionSourceSelector`: Pro Controller, then the chosen Joy-Con
+  of the pair (`aim.gyro_joycon`, right by default, L3+R3 > Controls > Camera > Aiming > Gyro Joy-Con (detached)),
+  the other one only after the chosen one has been missing for 3 s (nothing is read meanwhile), then handheld.
+- **Not the cause:** `start_rc=0x0` and `restarts=0` everywhere; ~160 samples/s from the right Joy-Con, ~199/s
+  left, ~200/s handheld. Axes: one conversion for every source (HOS reports a Joy-Con of a dual pair in its
+  on-rail frame [INF]); the log cannot show their direction, the player is asked.
+- **Log:** the motion line ends with `gyro_joycon=<right|left>` and a change of it writes a line.
+- **Tests:** `three_ds_recomp_input_tests` (TestSensorChangeKeepsGyroAim), `oot3d_switch_motion_tests`
+  (TestSourceSelector, TestMotionLog), `oot3d_native_a32_input_tests` (aim.gyro_joycon).
+
 ### Hold A on the Items page did nothing (issue #13, 11/12)
 - **Seen:** "Pressing and holding the A button to assign objects to the D-pad does not work" (no log,
   no build named; 0.2.3 is the first with the picker). Not reproduced: no host build of the game here.

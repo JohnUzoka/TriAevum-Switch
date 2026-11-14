@@ -57,6 +57,11 @@ using NativeAnalogStick = ThreeDsRecomp::Input::AnalogStick;
 using NativeMotionSource = ThreeDsRecomp::Input::MotionSource;
 using NativeControlBinding = ThreeDsRecomp::Input::HostBinding;
 
+// The Joy-Con of a detached pair (Switch, player 1 dual Joy-Con) whose motion
+// sensor aims: aim.gyro_joycon, "right" by default. The other one is read
+// only while this one stays disconnected (oot3d_switch_motion.h).
+enum class NativeGyroJoyCon : std::uint8_t { Right, Left };
+
 struct NativeControlConfig {
   NativeControlProfile Profile = NativeControlProfile::KeyboardMouse;
   bool KeyboardEnabled = true;
@@ -82,6 +87,7 @@ struct NativeControlConfig {
   // 90 degrees for a drag across half the 1280-pixel screen.
   bool TouchAimEnabled = true;
   float TouchAimDegreesPerPixel = 0.14F;
+  NativeGyroJoyCon GyroJoyCon = NativeGyroJoyCon::Right;
   std::string PreferredControllerGuid;
   std::string PreferredControllerSerial;
   bool ControllerTouchpadEnabled = true;
@@ -101,6 +107,7 @@ const char* NativeMouseButtonName(NativeMouseButton button) noexcept;
 const char* NativeGamepadButtonName(NativeGamepadButton button) noexcept;
 const char* NativeAnalogStickName(NativeAnalogStick stick) noexcept;
 const char* NativeMotionSourceName(NativeMotionSource source) noexcept;
+const char* NativeGyroJoyConName(NativeGyroJoyCon joyCon) noexcept;
 
 bool ParseNativeControlProfile(std::string_view value,
                                NativeControlProfile* profile) noexcept;
@@ -116,6 +123,8 @@ bool ParseNativeAnalogStick(std::string_view value,
                             NativeAnalogStick* stick) noexcept;
 bool ParseNativeMotionSource(std::string_view value,
                              NativeMotionSource* source) noexcept;
+bool ParseNativeGyroJoyCon(std::string_view value,
+                           NativeGyroJoyCon* joyCon) noexcept;
 
 NativeControlConfig NativeControlPreset(NativeControlProfile profile);
 NativeControlConfig NativeControlDefaults();

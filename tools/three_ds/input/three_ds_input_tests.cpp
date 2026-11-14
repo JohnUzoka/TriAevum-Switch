@@ -339,11 +339,51 @@ void TestPhysicalGyroAfterSyntheticAim() {
                 "physical turn changed after mixed aim");
 }
 
+// Regression (Switch, Automatic aim, a player's log 11/13): after the
+// Joy-Cons were detached (handheld sensor, a second without any, then the
+// right Joy-Con's), or a Joy-Con reconnected, the aim ignored the new
+// sensor until a button or stick moved. The gap's virtual pose set Active,
+// and the reset on the sensor change handed the aim to the mouse. A sensor
+// change of the same controller keeps the controller as the owner.
+void TestSensorChangeKeepsGyroAim() {
+    using namespace ThreeDsRecomp::Input;
+    MappingConfig config;  // Automatic.
+    VirtualMotionState state;
+    PhysicalInputState pitchUp;
+    pitchUp.SamplePeriodSeconds = 1.0 / 30.0;
+    pitchUp.ControllerMotion.GyroscopeValid = pitchUp.ControllerMotion.AccelerometerValid = true;
+    pitchUp.ControllerMotion.Accelerometer = {0, -1, 0};
+    pitchUp.ControllerMotion.GyroscopeDegreesPerSecond = {-36, 0, 0};
+    auto noSensor = pitchUp;
+    noSensor.ControllerMotion = {};
+    const auto step = [&](const PhysicalInputState& input) {
+        return ResolveInput(config, input, {}, {}, nullptr, true, &state).Hid;
+    };
+    RequireNear(step(pitchUp).GyroscopeDegreesPerSecond, {-36, 0, 0}, "handheld gyro did not aim");
+    // Handheld sensor gone: a second with no sensor (none), then the right
+    // Joy-Con's, whose first poll has no sample yet.
+    state.ResetSensor();
+    for (int i = 0; i < 30; ++i) step(noSensor);
+    Require(state.Active, "the gap without a sensor did not fall back to the virtual pose");
+    state.ResetSensor();
+    step(noSensor);
+    RequireNear(step(pitchUp).GyroscopeDegreesPerSecond, {-36, 0, 0},
+                "the new sensor's gyro did not aim after the gap");
+    Require(state.AutomaticOwner == VirtualMotionState::Owner::Controller && !state.Active,
+            "the sensor change handed the aim to the mouse");
+    // A stall restart of the same sensor (data stale for a moment): the same.
+    step(noSensor);
+    state.ResetSensor();
+    RequireNear(step(pitchUp).GyroscopeDegreesPerSecond, {-36, 0, 0},
+                "the restarted sensor's gyro did not aim");
+}
+
 } // namespace
 
 int main() try {
     TestAutomaticMotionComposition();
     TestPhysicalGyroAfterSyntheticAim();
+    TestSensorChangeKeepsGyroAim();
     {
         using namespace ThreeDsRecomp::Input;
         const auto motion = ConvertSdlMotion({9.80665F, 9.80665F, -9.80665F}, true,

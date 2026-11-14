@@ -761,6 +761,10 @@ void VirtualMotionState::RestoreGravity(const std::array<float, 3>& gravity) noe
 void VirtualMotionState::ResetController() noexcept {
     PreviousControllerButtons = 0;
     if (AutomaticOwner == Owner::Controller) AutomaticOwner = Owner::None;
+    ResetSensor();
+}
+
+void VirtualMotionState::ResetSensor() noexcept {
     Composition.ResetReference();
 }
 

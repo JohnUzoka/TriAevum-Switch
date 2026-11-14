@@ -23,7 +23,8 @@ dump and decrypt it. eShop copies (`.cia`) and other versions are not supported.
 
 - **Menu:** press both sticks in (L3+R3) for settings, the performance overlay, updates and Exit game.
   Touch works in the menu too.
-- **Controls:** gyro aiming with the console, a Pro Controller or a pair of Joy-Cons; tap the on-screen
+- **Controls:** gyro aiming with the console, a Pro Controller or a pair of Joy-Cons (the right Joy-Con aims;
+  L3+R3 → Controls → Camera → Aiming → Gyro Joy-Con (detached) picks the left one); tap the on-screen
   item, X/Y and D-pad icons; drag a finger on empty screen to aim. L3+R3 → Controls → Camera → Free
   camera → Smoothing Off makes the free camera stop as soon as you let go of the stick.
 - **Updates:** L3+R3 → Updates → Check for updates. Saves, settings and game files are kept. The game

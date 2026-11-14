@@ -586,6 +586,26 @@ int main(int argc, char** argv) {
         Require(std::abs(mapped(50.0F) + 210.0F) < 0.1F && mapped(0.0F) == 0.0F,
                 "a touch drag did not reach the automatic aim at 0.14 deg/px");
     }
+    // The gyro's Joy-Con of a detached pair: right when absent (files from
+    // before it), left round-trips, an unknown name is refused.
+    Require(ParseNativeControlConfigText(
+                R"({"schema":"oot3d_native_controls_v1","profile":"controller","aim":{"source":"automatic"}})",
+                &parsedControls, &controlsError) &&
+                parsedControls.GyroJoyCon == NativeGyroJoyCon::Right && defaults.GyroJoyCon == NativeGyroJoyCon::Right,
+            "the gyro's Joy-Con did not default to the right one");
+    {
+        auto leftConfig = controllerConfig;
+        leftConfig.GyroJoyCon = NativeGyroJoyCon::Left;
+        Require(SerializeNativeControlConfigText(leftConfig, &serializedControls, &controlsError) &&
+                    serializedControls.find("\"gyro_joycon\": \"left\"") != std::string::npos &&
+                    ParseNativeControlConfigText(serializedControls, &parsedControls, &controlsError) &&
+                    parsedControls.GyroJoyCon == NativeGyroJoyCon::Left,
+                "the gyro's Joy-Con did not round-trip");
+        Require(!ParseNativeControlConfigText(
+                    R"({"schema":"oot3d_native_controls_v1","profile":"controller","aim":{"source":"automatic","gyro_joycon":"middle"}})",
+                    &parsedControls, &controlsError),
+                "an unknown gyro Joy-Con was accepted");
+    }
 
     Require(ParseNativeControlConfigText(
                 R"({"schema":"oot3d_native_controls_v1","profile":"controller","free_camera":{"source":"controller_motion","motion_sensitivity":4}})",

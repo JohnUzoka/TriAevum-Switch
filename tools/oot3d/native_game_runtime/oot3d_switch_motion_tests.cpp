@@ -295,6 +295,81 @@ void TestMotionLog() {
   now += 2'000'000;
   line = log.Observe(sample, now);
   Require(line && Contains(*line, "sensor=handheld start_rc=0x1234"), "a failed start did not show its result");
+  Require(Contains(*line, " guest_nonzero=0 gyro_joycon=right"), "the line does not name the gyro's Joy-Con");
+
+  // Picking the left Joy-Con is a change.
+  sample.GyroJoyCon = NativeGyroJoyCon::Left;
+  now += 2'000'000;
+  line = log.Observe(sample, now);
+  Require(line && Contains(*line, "reason=change") && Contains(*line, " gyro_joycon=left"),
+          "choosing the left Joy-Con did not write a change line");
+}
+
+// The sequences of a player's log (11/13, official Joy-Cons detached).
+void TestSourceSelector() {
+  constexpr auto kRight = NativeGyroJoyCon::Right;
+  constexpr std::uint64_t kSecond = 1'000'000;
+  const SwitchMotionDevices handheld{.Handheld = true};
+  const SwitchMotionDevices none{};
+  const SwitchMotionDevices leftOnly{.JoyDualLeft = true};
+  const SwitchMotionDevices rightOnly{.JoyDualRight = true};
+  const SwitchMotionDevices pair{.JoyDualLeft = true, .JoyDualRight = true};
+  SwitchMotionSourceSelector selector;
+  std::uint64_t now = 100 * kSecond;
+  Require(selector.Select(handheld, kRight, now) == SwitchMotionSource::Handheld, "handheld was not read");
+  Require(selector.Select({.FullKey = true, .Handheld = true}, kRight, now) == SwitchMotionSource::FullKey,
+          "a Pro Controller did not win over handheld");
+
+  // 22:08: the pair detached, the left one connects 1.6 s before the right.
+  Require(selector.Select(none, kRight, now += kSecond) == SwitchMotionSource::None, "nothing connected");
+  Require(selector.Select(leftOnly, kRight, now += kSecond) == SwitchMotionSource::None,
+          "the left Joy-Con was read while the right one was connecting");
+  Require(selector.Select(leftOnly, kRight, now += 1'600'000) == SwitchMotionSource::None,
+          "the left Joy-Con was read 1.6 s into the pairing");
+  Require(selector.Select(pair, kRight, now += 16'667) == SwitchMotionSource::JoyDualRight,
+          "the right Joy-Con of the pair was not read");
+
+  // 22:09:46-22:09:48: the left one drops for a second; the right stays.
+  Require(selector.Select(rightOnly, kRight, now += kSecond) == SwitchMotionSource::JoyDualRight &&
+              selector.Select(pair, kRight, now += kSecond) == SwitchMotionSource::JoyDualRight,
+          "the left Joy-Con's drop moved the sensor");
+
+  // A short drop of the right one (2 s), twice: never the left hand.
+  for (int drop = 0; drop < 2; ++drop) {
+    const std::uint64_t start = now += kSecond;
+    while (now < start + 2 * kSecond) {
+      Require(selector.Select(leftOnly, kRight, now) == SwitchMotionSource::None,
+              "a short drop of the right Joy-Con moved the sensor to the left hand");
+      now += 16'667;
+    }
+    Require(selector.Select(pair, kRight, now) == SwitchMotionSource::JoyDualRight,
+            "the right Joy-Con was not read again after its drop");
+  }
+
+  // 22:09:50-22:10:22: the right one gone for 31 s: the left one after the
+  // fallback delay, the right one again as soon as it is back.
+  const std::uint64_t gone = now += kSecond;
+  Require(selector.Select(leftOnly, kRight, now) == SwitchMotionSource::None, "the right one's drop");
+  now = gone + SwitchMotionSourceSelector::FallbackMicroseconds;
+  Require(selector.Select(leftOnly, kRight, now) == SwitchMotionSource::JoyDualLeft,
+          "the left Joy-Con was not read once the right one stayed away");
+  Require(selector.Select(leftOnly, kRight, now += 27 * kSecond) == SwitchMotionSource::JoyDualLeft,
+          "the fallback did not hold");
+  Require(selector.Select(pair, kRight, now += kSecond) == SwitchMotionSource::JoyDualRight,
+          "the right Joy-Con was not read again when it came back");
+
+  // aim.gyro_joycon left: the same rules mirrored.
+  SwitchMotionSourceSelector leftHanded;
+  Require(leftHanded.Select(pair, NativeGyroJoyCon::Left, now) == SwitchMotionSource::JoyDualLeft,
+          "the chosen left Joy-Con was not read");
+  Require(leftHanded.Select(rightOnly, NativeGyroJoyCon::Left, now += kSecond) == SwitchMotionSource::None &&
+              leftHanded.Select(rightOnly, NativeGyroJoyCon::Left,
+                                now += SwitchMotionSourceSelector::FallbackMicroseconds) ==
+                  SwitchMotionSource::JoyDualRight,
+          "the left choice did not fall back to the right one after the delay");
+  // Back to handheld (the pair attached): the console's sensor at once.
+  Require(leftHanded.Select(handheld, NativeGyroJoyCon::Left, now += 16'667) == SwitchMotionSource::Handheld,
+          "attaching the pair did not read handheld");
 }
 
 } // namespace
@@ -307,6 +382,7 @@ int main() {
   TestAccumulator();
   TestCalibrationSeesFreshSamples();
   TestMotionLog();
+  TestSourceSelector();
   std::puts("oot3d_switch_motion_tests: ok");
   return 0;
 }

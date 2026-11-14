@@ -56,6 +56,11 @@ constexpr std::array<NamedValue<NativeControlAction>,
         {NativeControlAction::LookRight, "look_right"},
     }};
 
+constexpr std::array<NamedValue<NativeGyroJoyCon>, 2> kGyroJoyCons{{
+    {NativeGyroJoyCon::Right, "right"},
+    {NativeGyroJoyCon::Left, "left"},
+}};
+
 template <typename Enum, std::size_t Size>
 const char* NameOf(Enum value,
                    const std::array<NamedValue<Enum>, Size>& values) noexcept {
@@ -347,6 +352,11 @@ bool DecodeNativeControlConfig(const nlohmann::json& document,
         aim.value("touch_enabled", parsed.TouchAimEnabled);
     parsed.TouchAimDegreesPerPixel =
         aim.value("touch_degrees_per_pixel", parsed.TouchAimDegreesPerPixel);
+    // Absent in files written before it: the right Joy-Con.
+    if (!ReadNamedField(aim, "gyro_joycon", &parsed.GyroJoyCon,
+                        ParseNativeGyroJoyCon, error)) {
+      return false;
+    }
   }
 
   if (document.contains("free_camera")) {
@@ -421,6 +431,10 @@ const char* NativeMotionSourceName(NativeMotionSource source) noexcept {
   return ThreeDsRecomp::Input::MotionSourceName(source);
 }
 
+const char* NativeGyroJoyConName(NativeGyroJoyCon joyCon) noexcept {
+  return NameOf(joyCon, kGyroJoyCons);
+}
+
 bool ParseNativeControlProfile(std::string_view value,
                                NativeControlProfile* profile) noexcept {
   return ThreeDsRecomp::Input::ParseControlProfile(value, profile);
@@ -454,6 +468,11 @@ bool ParseNativeAnalogStick(std::string_view value,
 bool ParseNativeMotionSource(std::string_view value,
                              NativeMotionSource* source) noexcept {
   return ThreeDsRecomp::Input::ParseMotionSource(value, source);
+}
+
+bool ParseNativeGyroJoyCon(std::string_view value,
+                           NativeGyroJoyCon* joyCon) noexcept {
+  return ParseNamed(value, joyCon, kGyroJoyCons);
 }
 
 NativeControlConfig NativeControlPreset(NativeControlProfile profile) {
@@ -701,7 +720,8 @@ bool SerializeNativeControlConfigText(const NativeControlConfig& config,
         {"invert_x", config.NativeAimInvertX},
         {"invert_y", config.NativeAimInvertY},
         {"touch_enabled", config.TouchAimEnabled},
-        {"touch_degrees_per_pixel", config.TouchAimDegreesPerPixel}}},
+        {"touch_degrees_per_pixel", config.TouchAimDegreesPerPixel},
+        {"gyro_joycon", NativeGyroJoyConName(config.GyroJoyCon)}}},
       {"free_camera",
        {{"source", NativeMotionSourceName(ThreeDsRecomp::Input::NormalizeCameraSource(config.FreeCameraSource))},
         {"mouse_units_per_pixel",

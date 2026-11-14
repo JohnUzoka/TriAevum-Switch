@@ -108,13 +108,32 @@ const char *SwitchMotionSourceName(SwitchMotionSource source) noexcept {
   return "none";
 }
 
+SwitchMotionSource SwitchMotionSourceSelector::Select(const SwitchMotionDevices &devices, NativeGyroJoyCon joyCon,
+                                                      std::uint64_t nowMicroseconds) noexcept {
+  const bool left = joyCon == NativeGyroJoyCon::Left;
+  const bool chosen = left ? devices.JoyDualLeft : devices.JoyDualRight;
+  const bool other = left ? devices.JoyDualRight : devices.JoyDualLeft;
+  if (devices.FullKey || chosen || !other) {
+    mAwaiting = false;
+  } else if (!mAwaiting) {
+    mAwaiting = true;
+    mAwaitingSinceMicroseconds = nowMicroseconds;
+  }
+  if (devices.FullKey) return SwitchMotionSource::FullKey;
+  if (chosen) return left ? SwitchMotionSource::JoyDualLeft : SwitchMotionSource::JoyDualRight;
+  if (other && nowMicroseconds - mAwaitingSinceMicroseconds >= FallbackMicroseconds)
+    return left ? SwitchMotionSource::JoyDualRight : SwitchMotionSource::JoyDualLeft;
+  if (devices.Handheld) return SwitchMotionSource::Handheld;
+  return SwitchMotionSource::None;
+}
+
 std::optional<std::string> SwitchMotionLog::Observe(const SwitchMotionLogSample &sample,
                                                     std::uint64_t nowMicroseconds) {
   // A change waits this long after the previous line, so a state that flips
   // every poll still gives at most one line a second.
   constexpr std::uint64_t kChangeSpacingMicroseconds = 1'000'000;
-  const Key key{sample.Wanted,  sample.ControllerInstance, sample.Available,
-                sample.Running, sample.StartResult,        sample.GuestGyroscopeEnabled};
+  const Key key{sample.Wanted,      sample.ControllerInstance,    sample.Available, sample.Running,
+                sample.StartResult, sample.GuestGyroscopeEnabled, sample.GyroJoyCon};
   ++mPolls;
   mWantedPolls += sample.Wanted ? 1U : 0U;
   mSamples += sample.SamplesAdded;
@@ -137,13 +156,14 @@ std::optional<std::string> SwitchMotionLog::Observe(const SwitchMotionLogSample 
                   "motion: reason=%s pad=%" PRId32 " wanted=%d available=%s sensor=%s start_rc=0x%" PRIX32
                   " window_s=%.1f polls=%" PRIu64 " wanted_polls=%" PRIu64 " samples=%" PRIu64
                   " valid=%" PRIu64 " restarts=%" PRIu64 " physical_aim=%" PRIu64 " guest_gyro=%s guest_ring=%" PRIu64
-                  " guest_nonzero=%" PRIu64,
+                  " guest_nonzero=%" PRIu64 " gyro_joycon=%s",
                   reason, sample.ControllerInstance, sample.Wanted ? 1 : 0, SwitchMotionSourceName(sample.Available),
                   SwitchMotionSourceName(sample.Running), sample.StartResult,
                   mStarted ? static_cast<double>(elapsed) * 1e-6 : 0.0, mPolls, mWantedPolls, mSamples, mValidPolls,
                   mRestarts, mPhysicalAimPolls, sample.GuestGyroscopeEnabled ? "on" : "off",
                   sample.GuestGyroscopeSamples - mGuestSamplesAtWindowStart,
-                  sample.GuestNonzeroGyroscopeSamples - mGuestNonzeroAtWindowStart);
+                  sample.GuestNonzeroGyroscopeSamples - mGuestNonzeroAtWindowStart,
+                  sample.GyroJoyCon == NativeGyroJoyCon::Left ? "left" : "right");
     line.emplace(text);
     mKey = key;
     mStarted = true;
@@ -187,6 +207,9 @@ struct SwitchMotionProvider {
   // on the game thread (SDL's pump calls appletMainLoop), atomic regardless.
   std::atomic<bool> RestartRequested{false};
   SwitchMotionAccumulator Accumulator;
+  SwitchMotionSourceSelector Selector;
+  // SwitchMotionAvailableSource's pick for this poll.
+  MotionSource Available = MotionSource::None;
 };
 
 SwitchMotionProvider& Provider() {
@@ -217,26 +240,23 @@ void RequestHandles(SwitchMotionProvider& provider) {
   appletHook(&provider.Hook, &OnAppletHook, &provider);
 }
 
-MotionSource SelectSource(const SwitchMotionProvider& provider) {
+SwitchMotionDevices ReadDevices(const SwitchMotionProvider& provider) {
+  SwitchMotionDevices devices;
   HidNpadCommonState state{};
   const u32 player1 = hidGetNpadStyleSet(HidNpadIdType_No1);
-  if (provider.FullKeyReady && (player1 & HidNpadStyleTag_NpadFullKey) != 0 &&
+  devices.FullKey = provider.FullKeyReady && (player1 & HidNpadStyleTag_NpadFullKey) != 0 &&
       hidGetNpadStatesFullKey(HidNpadIdType_No1, &state, 1) != 0 &&
-      (state.attributes & HidNpadAttribute_IsConnected) != 0) {
-    return MotionSource::FullKey;
-  }
+      (state.attributes & HidNpadAttribute_IsConnected) != 0;
   if (provider.JoyDualReady && (player1 & HidNpadStyleTag_NpadJoyDual) != 0 &&
       hidGetNpadStatesJoyDual(HidNpadIdType_No1, &state, 1) != 0) {
-    if ((state.attributes & HidNpadAttribute_IsRightConnected) != 0) return MotionSource::JoyDualRight;
-    if ((state.attributes & HidNpadAttribute_IsLeftConnected) != 0) return MotionSource::JoyDualLeft;
+    devices.JoyDualLeft = (state.attributes & HidNpadAttribute_IsLeftConnected) != 0;
+    devices.JoyDualRight = (state.attributes & HidNpadAttribute_IsRightConnected) != 0;
   }
-  if (provider.HandheldReady &&
+  devices.Handheld = provider.HandheldReady &&
       (hidGetNpadStyleSet(HidNpadIdType_Handheld) & HidNpadStyleTag_NpadHandheld) != 0 &&
       hidGetNpadStatesHandheld(HidNpadIdType_Handheld, &state, 1) != 0 &&
-      (state.attributes & HidNpadAttribute_IsConnected) != 0) {
-    return MotionSource::Handheld;
-  }
-  return MotionSource::None;
+      (state.attributes & HidNpadAttribute_IsConnected) != 0;
+  return devices;
 }
 
 HidSixAxisSensorHandle HandleFor(const SwitchMotionProvider& provider, MotionSource source) {
@@ -268,10 +288,11 @@ void Start(SwitchMotionProvider& provider, MotionSource source, std::uint64_t no
 
 } // namespace
 
-SwitchMotionSource SwitchMotionAvailableSource() noexcept {
+SwitchMotionSource SwitchMotionAvailableSource(NativeGyroJoyCon joyCon) noexcept {
   auto& provider = Provider();
   RequestHandles(provider);
-  return SelectSource(provider);
+  provider.Available = provider.Selector.Select(ReadDevices(provider), joyCon, NowMicroseconds());
+  return provider.Available;
 }
 
 SwitchMotionPoll PollSwitchMotion(bool wanted, bool consume) noexcept {
@@ -282,7 +303,7 @@ SwitchMotionPoll PollSwitchMotion(bool wanted, bool consume) noexcept {
   const bool inFocus = appletGetFocusState() == AppletFocusState_InFocus;
   // Out of focus (HOME menu, sleep, the controller applet) the sensor is
   // stopped; it starts again on the first poll back in focus.
-  const MotionSource target = wanted && inFocus ? SelectSource(provider) : MotionSource::None;
+  const MotionSource target = wanted && inFocus ? provider.Available : MotionSource::None;
   const bool restart = inFocus && provider.RestartRequested.exchange(false, std::memory_order_relaxed);
   if (target != provider.Started || (restart && target != MotionSource::None)) {
     Stop(provider);

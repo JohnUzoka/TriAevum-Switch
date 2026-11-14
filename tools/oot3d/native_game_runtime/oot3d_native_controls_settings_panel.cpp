@@ -151,6 +151,10 @@ constexpr std::array kCameraSources{
     NativeMotionSource::Automatic,
 };
 
+#if defined(__SWITCH__)
+constexpr std::array kGyroJoyCons{NativeGyroJoyCon::Right, NativeGyroJoyCon::Left};
+#endif
+
 constexpr std::array<const char*, kNativeControlActionCount> kActionLabels{
     "Move forward", "Move backward", "Move left", "Move right",
     "A", "B", "X", "Y", "L", "R", "ZL", "ZR", "Select", "Start",
@@ -634,6 +638,17 @@ class NativeControlsSettingsPanel final
       changed |= ControlWidgets::SliderFloat(
           "Touch aim sensitivity", &mControlDraft.TouchAimDegreesPerPixel,
           0.02F, 1.0F, "%.2f deg/px", ImGuiSliderFlags_Logarithmic);
+    }
+    // Detached Joy-Cons: which one's motion sensor aims (the other one only
+    // while it stays disconnected; oot3d_switch_motion.h).
+    if (SourceUses(mControlDraft.NativeAimSource,
+                   NativeMotionSource::ControllerGyroscope) ||
+        mControlDraft.NativeAimSource ==
+            NativeMotionSource::ControllerAccelerometer ||
+        mControlDraft.NativeAimSource ==
+            NativeMotionSource::ControllerMotion) {
+      changed |= EnumCombo("Gyro Joy-Con (detached)", &mControlDraft.GyroJoyCon,
+                           kGyroJoyCons, NativeGyroJoyConName);
     }
 #endif
     changed |= ImGui::Checkbox(

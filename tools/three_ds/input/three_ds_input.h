@@ -434,7 +434,14 @@ struct VirtualMotionState {
     Owner AutomaticOwner = Owner::None;
     std::uint32_t PreviousControllerButtons = 0;
     MotionCompositionState Composition;
+    // Another controller: Automatic aim decides its owner again.
     void ResetController() noexcept;
+    // The same controller's sensor changed (another sensor of it, a restart, a
+    // reconnect): the pose is re-aligned to the new sensor and Automatic aim
+    // keeps its owner. ResetController here would hand the aim to the mouse
+    // after a gap without motion (Active from the gap's virtual pose), so the
+    // new sensor was ignored until a button or stick moved.
+    void ResetSensor() noexcept;
     void RestoreGravity(const std::array<float, 3>& gravity) noexcept;
 };
 
