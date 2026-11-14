@@ -918,6 +918,31 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   changed meanwhile, nothing is sent). A is no longer kept from the game.
 - **Test:** `oot3d_top_screen_mod_profile_tests` (TestPicker, the log lines).
 
+### Settings kept across updates (user, 11/13)
+- **Seen:** "default settings are applied on top of users' settings, like someone claimed they need to turn off
+  grass on every update".
+- **Cause:** every release zip (0.2.0 .. 0.2.6-test.2) carried 19 files in `switch/oot3dre/config/`: renderer,
+  fps60, fps60_mode, resolution_scale(_docked), upscaler, sharpen, anisotropy, dynamic_resolution, the deko3d
+  present files, early_frame_slot, pacer_vsync, parallel_presentation, skip_bottom_screen, unlock_master_quest,
+  oot3d_controls.json and topscreen_ui.json. Players who update by copying the whole zip got all of them back,
+  including the on/off files whose Off is the file's absence (fps60, unlock_master_quest, dynamic_resolution...).
+  The in-game updater never touches `config/` (`IsManagedInstallPath`).
+- **Grass:** not reset by any update: `config/grass` absent = Off since it was added, the panel removes it for Off,
+  no zip ever had it, and the updater cannot write it. [INFERENCE] The report is the other video settings coming
+  back after a zip copy, or the game's own grass models.
+- **Fix:** the zip has no `config/` (`release-fork.sh` refuses a `config/` member and an NRO without the seeding
+  code). The defaults are compiled in (`oot3d_config_defaults.cpp`, byte-identical to the old zip's) and `main`
+  writes them before anything reads `config/`: a default only when its file is missing and
+  `config/defaults_applied` does not list it; every default written or found is recorded, so a removal the player
+  made stays. An install without the record that has any file of the old zip came from such a zip: those
+  defaults count as received and none is written back. A default a later release adds is written once where
+  missing; unknown files are never touched; deleting `config/` starts over. Log: `config defaults: seeded=...
+  record=new|kept legacy=0|1`.
+- **Tests:** `oot3d_config_defaults_tests` (fresh install, choices kept, unknown files, legacy installs, later
+  default, failure, zip tree copied over an install). Console check: on a 0.2.x install with fps60 removed,
+  extract the new zip over it: 30 FPS stays; the log shows `record=new legacy=1` once, then nothing at later starts;
+  on an empty SD the first start writes the 19 files and `defaults_applied`.
+
 ### Update-available notice without opening the menu (user, 11/13)
 - **Seen:** "it shows in the debug menu but there is no popup if you don't open it": the launch update check
   found the new version (L3+R3 > Updates had it), but the "Version X is available: L3+R3 > Updates" notice never

@@ -213,6 +213,15 @@ target_compile_features(oot3d_romfs_mods_tests PRIVATE cxx_std_20)
 target_link_libraries(oot3d_romfs_mods_tests PRIVATE nlohmann_json::nlohmann_json)
 oot3d_target_defaults(oot3d_romfs_mods_tests NO_WARNING_OVERRIDE FOLDER Tests)
 
+# Default settings (config/defaults_applied): seeded once where missing, a
+# player's file or removal kept, an install from an older zip recognised.
+add_executable(oot3d_config_defaults_tests EXCLUDE_FROM_ALL
+    tools/oot3d/native_game_runtime/oot3d_config_defaults_tests.cpp
+    tools/oot3d/native_game_runtime/oot3d_config_defaults.cpp
+)
+target_compile_features(oot3d_config_defaults_tests PRIVATE cxx_std_20)
+oot3d_target_defaults(oot3d_config_defaults_tests FOLDER Tests)
+
 # Texture pack size cap, mipmaps and the HD textures setting (pure parts).
 add_executable(oot3d_texture_pack_scale_tests EXCLUDE_FROM_ALL
     tools/oot3d/native_game_runtime/oot3d_texture_pack_scale_tests.cpp
@@ -832,6 +841,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "NintendoSwitch")
     # RomFS mods: the overlay composed at start-up from mods/<name>/romfs/.
     target_sources(oot3d_native_game PRIVATE
         tools/oot3d/native_game_runtime/oot3d_romfs_mods.cpp)
+    # Default settings: written into config/ at start-up, once per default,
+    # only where the file is missing (the release zip has no config/).
+    target_sources(oot3d_native_game PRIVATE
+        tools/oot3d/native_game_runtime/oot3d_config_defaults.cpp)
     # Only this file sees the version: a new one recompiles one source.
     set_source_files_properties(tools/oot3d/native_game_runtime/oot3d_build_version.cpp
         PROPERTIES COMPILE_DEFINITIONS

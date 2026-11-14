@@ -30,6 +30,7 @@
 
 #if defined(__SWITCH__)
 #include "fast/oot3d/debug_menu.h"
+#include "oot3d_config_defaults.h"
 #include "oot3d_update_panel.h"
 #include "oot3d_whole_aot_gcov.h"
 #include "oot3d_switch_console_screen.h"
@@ -227,6 +228,14 @@ int main(int argc, char** argv) {
         WriteSwitchBootStatus("starting", {},
                               Oot3dNativeGame::FormatSwitchLaunchEnvironment(launchEnvironment));
         Oot3dNativeGame::WriteGameLog(Oot3dNativeGame::FormatSwitchLaunchLine(launchEnvironment));
+        // The defaults of a first install (and those a release adds), each
+        // written once and only where its file is missing, before anything
+        // reads config/ (oot3d_config_defaults.h): an update never replaces a
+        // setting the player chose.
+        if (auto line = Oot3dNativeGame::FormatConfigDefaultsLine(
+                Oot3dNativeGame::SeedConfigDefaults("sdmc:/switch/oot3dre/config"));
+            !line.empty())
+            Oot3dNativeGame::WriteGameLog(std::move(line));
         PlaceSwitchMainThread();
         // Instrumented (PGO generate) build only: stream the counts to
         // sdmc:/switch/oot3dre/pgo (oot3d_whole_aot_gcov.h).

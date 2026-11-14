@@ -3119,6 +3119,23 @@ GUARDS = [
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
           r'const auto availableMotion = SwitchMotionAvailableSource\(config\.GyroJoyCon\);',
           "oot3d_switch_motion_tests (TestSourceSelector)"),
+    # --- 11/14: settings reset by copying a release zip over an install ---
+    Guard("players had to set their settings again after every update (user, 11/13: 'turn off grass on every "
+          "update'): release zips up to 0.2.6-test.2 shipped config/, so a zip copied over an install replaced "
+          "the player's renderer, FPS, resolution, controls and HUD layout. The defaults are compiled in and "
+          "written at start only where the file is missing and config/defaults_applied does not list them; an "
+          "install made from an old zip (no record, a legacy file present) gets none written back",
+          "tools/oot3d/native_game_runtime/oot3d_config_defaults.cpp",
+          r'if \(!ReadRecord\(recordPath, applied\)\) \{.*?'
+          r'entry\.InLegacyZip && Exists\(configDirectory / entry\.Name\).*?'
+          r'if \(result\.LegacyInstall\)\s+for \(const auto &entry : defaults\)\s+if \(entry\.InLegacyZip\) applied\.emplace\(entry\.Name\);.*?'
+          r'if \(applied\.contains\(entry\.Name\)\) continue;.*?'
+          r'if \(!Exists\(path\)\) \{\s+if \(!WriteWhole\(path, entry\.Contents\)\)',
+          "oot3d_config_defaults_tests (TestPlayerChoicesKept, TestLegacyInstall, TestZipCopiedOverInstall)"),
+    Guard("the config/ defaults are written before anything reads config/ (thread layout, imports, launch "
+          "arguments, Setup), so a first install starts with the same settings the old zip gave it",
+          "tools/oot3d/native_game_runtime/oot3d_native_game.cpp",
+          r'SeedConfigDefaults\("sdmc:/switch/oot3dre/config"\).*?PlaceSwitchMainThread\(\);.*?RunSwitchRomImport\(\)'),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay
