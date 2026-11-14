@@ -8,7 +8,9 @@
 // point, and darkens it by the silhouette where the light takes that point
 // (player_shadow_decal_fsh.glsl): the shadow lies on the ground, steps and
 // walls that are there and ends at a ledge. Taken only from draws that leave
-// depth to the rasterizer; dkperf shadow_decal_ms.
+// depth to the rasterizer; dkperf shadow_decal_ms. His own pixels are masked:
+// his captured opaque draws set kPlayerShadowMaskBit where they pass (the
+// frame's depth reset clears it first), and the decal reads that stencil.
 #include "fast/backends/gfx_deko3d.h"
 #if defined(__SWITCH__)
 #include "fast/backends/gfx_deko3d_pica_pipeline.h"
@@ -45,7 +47,7 @@ struct PlayerShadowDecalUniforms {
     float Along[4];        // w: first along
     float Across[4];       // w: first across
     float Extent[4];       // 1 / along length, 1 / across length, lowest, highest
-    float Link[4];         // w: his radius
+    float Link[4];         // w: his radius, 0 when his pixels are masked
     float Middle[4];       // w: his height
     float Shade[4];        // opacity, the translucent floor's opacity, the fade's length, the raised floor's height
     float Eye[4];          // the camera; w: the translucent floor's height (none: lowest float)
@@ -117,17 +119,51 @@ void GfxRenderingAPIDeko3d::InitPlayerShadow() {
         shadow.SilhouetteMemory != nullptr ? "ready" : "MISSING");
 }
 
-void GfxRenderingAPIDeko3d::ObservePlayerShadowDraw(const GfxNativePicaDrawView&) {
+void GfxRenderingAPIDeko3d::ObservePlayerShadowDraw(const GfxNativePicaDrawView& draw) {
     auto& shadow = mPlayerShadow;
     const uint64_t frame = mDevice.Frame();
-    if (shadow.Frame == frame) return;
-    shadow.Frame = frame;
-    shadow.Selected = Oot3d::PlayerShadowBridge::Instance().Selected();
-    shadow.Projection.reset();
-    shadow.Region.reset();
-    shadow.WorldToClip.reset();
-    shadow.Light.reset();
-    shadow.Draws.clear();
+    if (shadow.Frame != frame) {
+        shadow.Frame = frame;
+        shadow.Selected = Oot3d::PlayerShadowBridge::Instance().Selected();
+        shadow.Projection.reset();
+        shadow.Region.reset();
+        shadow.WorldToClip.reset();
+        shadow.Light.reset();
+        shadow.Draws.clear();
+        shadow.StencilTaken = false;
+    }
+    // A game draw that tests or writes the bit of Link's mask: this frame
+    // keeps his cylinder instead (the Lens of Truth may use the stencil).
+    if (draw.Stencil.Enabled &&
+        ((draw.Stencil.WriteMask | draw.Stencil.CompareMask) & Oot3d::kPlayerShadowMaskBit) != 0U)
+        shadow.StencilTaken = true;
+}
+
+bool GfxRenderingAPIDeko3d::PlayerShadowMaskWanted() const {
+    const auto& shadow = mPlayerShadow;
+    return shadow.Frame == mDevice.Frame() && shadow.Selected && !shadow.StencilTaken &&
+           shadow.DecalFragment != nullptr && shadow.SilhouetteMemory != nullptr;
+}
+
+void GfxRenderingAPIDeko3d::NotePlayerShadowMaskCleared(const PicaTarget& target) {
+    auto& cleared = mPlayerShadow.MaskCleared;
+    if (cleared.size() >= 16U && !cleared.contains(target.Id)) cleared.clear(); // mostly gone targets
+    cleared[target.Id] = mDevice.Frame();
+}
+
+bool GfxRenderingAPIDeko3d::MarksPlayerShadowPixels(const GfxNativePicaDrawView& draw, const PicaTarget& target) {
+    const auto& shadow = mPlayerShadow;
+    if (!PlayerShadowMaskWanted()) return false;
+    const auto& composition = draw.Composition;
+    if (!composition.NativeActorGeometry ||
+        composition.NativeActorIdentity != Oot3d::PlayerShadowActorIdentity(shadow.Selected->Actor) ||
+        draw.CompositionDomain != Renderer3ds::PicaCompositionDomain::Scene ||
+        composition.Layer != Renderer3ds::PicaCompositionLayer::OpaqueWorld || composition.NativeProjectedShadow ||
+        !draw.DepthTestEnabled || !draw.DepthWriteEnabled || draw.Stencil.Enabled)
+        return false;
+    // Only on a target whose bit this frame's depth reset (or a fill) cleared.
+    const auto cleared = shadow.MaskCleared.find(target.Id);
+    return cleared != shadow.MaskCleared.end() && cleared->second == mDevice.Frame();
 }
 
 void GfxRenderingAPIDeko3d::CapturePlayerShadowDraw(const GfxNativePicaDrawView& draw, const PicaProgram& program,
@@ -262,22 +298,32 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadowSilhouette(const std::vector<PlayerS
     dkCmdBufBarrier(cmd, DkBarrier_Fragments, DkInvalidateFlags_Image);
 }
 
-uint32_t GfxRenderingAPIDeko3d::PlayerShadowDepthSlot(const PicaTarget& target) {
+GfxRenderingAPIDeko3d::PlayerShadowState::DepthStencilSlots GfxRenderingAPIDeko3d::PlayerShadowDepthSlot(
+    const PicaTarget& target) {
     auto& slots = mPlayerShadow.DepthSlots;
     if (const auto found = slots.find(target.Id); found != slots.end()) return found->second;
     // Targets are made at a scene's start; a long list is mostly gone ones.
     if (slots.size() >= 8U) {
-        for (const auto& [id, slot] : slots) mResources.FreeImageSlot(slot);
+        for (const auto& [id, slot] : slots) {
+            mResources.FreeImageSlot(slot.Depth);
+            if (slot.Stencil < PicaResources::kMaxImages) mResources.FreeImageSlot(slot.Stencil);
+        }
         slots.clear();
     }
-    const uint32_t slot = mResources.AllocateImageSlot();
-    if (slot >= PicaResources::kMaxImages) return slot;
+    PlayerShadowState::DepthStencilSlots made{mResources.AllocateImageSlot(), PicaResources::kMaxImages};
+    if (made.Depth >= PicaResources::kMaxImages) return made;
     DkImageView view;
     dkImageViewDefaults(&view, &target.DepthStencil);
     view.dsSource = DkDsSource_Depth;
-    mResources.WriteImageDescriptor(slot, view);
-    slots.emplace(target.Id, slot);
-    return slot;
+    mResources.WriteImageDescriptor(made.Depth, view);
+    // Its stencil (Link's own pixels): the stencil value in every component.
+    made.Stencil = mResources.AllocateImageSlot();
+    if (made.Stencil < PicaResources::kMaxImages) {
+        view.dsSource = DkDsSource_Stencil;
+        mResources.WriteImageDescriptor(made.Stencil, view);
+    }
+    slots.emplace(target.Id, made);
+    return made;
 }
 
 void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
@@ -293,7 +339,7 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     if (draws.empty() || !shadow.Selected) return;
     const float opacity = std::clamp(shadow.Selected->Opacity, 0.0F, 1.0F);
     if (opacity <= 0.0F) return;
-    const auto decal = shadow.Region && shadow.WorldToClip && shadow.Light && shadow.DecalFragment != nullptr &&
+    auto decal = shadow.Region && shadow.WorldToClip && shadow.Light && shadow.DecalFragment != nullptr &&
                                shadow.CoverVertex != nullptr && shadow.SilhouetteMemory != nullptr
                            ? Oot3d::PlayerShadowDecalOf(*shadow.Selected, *shadow.Region, *shadow.Light,
                                                         *shadow.WorldToClip)
@@ -308,11 +354,18 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
         if (const auto rect =
                 Oot3d::PlayerShadowDecalScreenRect(*shadow.WorldToClip, *decal, *shadow.Region, viewport, minusOneFirst))
             area = Intersect(area, WithinTarget(*rect, target.Extent.Width, target.Extent.Height));
-    const uint32_t depthSlot = decal ? PlayerShadowDepthSlot(target) : PicaResources::kMaxImages;
-    if (!decal || depthSlot >= PicaResources::kMaxImages) {
+    const auto slots = decal ? PlayerShadowDepthSlot(target)
+                             : PlayerShadowState::DepthStencilSlots{PicaResources::kMaxImages, PicaResources::kMaxImages};
+    if (!decal || slots.Depth >= PicaResources::kMaxImages) {
         ++shadow.Unavailable;
         return;
     }
+    // His pixels are masked (radius 0 in the uniforms) when his draws marked them on this target after
+    // this frame's clear of the bit (else his cylinder keeps the shadow off him).
+    const auto cleared = shadow.MaskCleared.find(target.Id);
+    decal->LinkMasked = !shadow.StencilTaken && slots.Stencil < PicaResources::kMaxImages &&
+                        cleared != shadow.MaskCleared.end() && cleared->second == mDevice.Frame();
+    shadow.Masked += decal->LinkMasked ? 1U : 0U;
     if (area.width == 0U || area.height == 0U) return; // off screen
 
     PlayerShadowDecalUniforms block{};
@@ -335,7 +388,7 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     block.Extent[1] = 1.0F / (decal->AcrossRange[1] - decal->AcrossRange[0]);
     block.Extent[2] = decal->Lowest;
     block.Extent[3] = decal->Highest;
-    put(block.Link, decal->Link, Oot3d::kPlayerShadowDecalLinkRadius);
+    put(block.Link, decal->Link, decal->LinkMasked ? 0.0F : Oot3d::kPlayerShadowDecalLinkRadius);
     put(block.Middle, decal->Middle, Oot3d::kPlayerShadowDecalLinkTall);
     block.Shade[0] = opacity;
     block.Shade[1] = decal->Floor ? decal->Floor->Opacity : 1.0F;
@@ -400,7 +453,9 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     dkCmdBufBindShaders(cmd, DkStageFlag_Vertex | DkStageFlag_Fragment, shaders, 2);
     dkCmdBufBindUniformBuffer(cmd, DkStage_Fragment, 0, uniforms.Gpu, blockBytes);
     dkCmdBufBindTexture(cmd, DkStage_Fragment, 0, dkMakeTextureHandle(shadow.SilhouetteSlot, mLinearClampSampler));
-    dkCmdBufBindTexture(cmd, DkStage_Fragment, 1, dkMakeTextureHandle(depthSlot, mLinearClampSampler));
+    dkCmdBufBindTexture(cmd, DkStage_Fragment, 1, dkMakeTextureHandle(slots.Depth, mLinearClampSampler));
+    dkCmdBufBindTexture(cmd, DkStage_Fragment, 2,
+                        dkMakeTextureHandle(decal->LinkMasked ? slots.Stencil : slots.Depth, mLinearClampSampler));
     dkCmdBufBindVtxAttribState(cmd, nullptr, 0);
     dkCmdBufBindVtxBufferState(cmd, nullptr, 0);
     ApplyDkViewport(cmd, static_cast<float>(area.x), static_cast<float>(area.y), static_cast<float>(area.width),
@@ -416,13 +471,14 @@ void GfxRenderingAPIDeko3d::DrawPlayerShadow(PicaTarget& target) {
     if (shadow.Frames++ % kPlayerShadowReportFrames == 0U) {
         const auto bridgeCounters = Oot3d::PlayerShadowBridge::Instance().Counters();
         Log("shadow: frame %llu decal, %zu meshes opacity %.2f height %.0f | %llu frames, %llu meshes, %llu "
-            "skipped, %llu without a decal, %llu pixels a frame | game frames %llu, with a shadow %llu, samples "
-            "without their frame %llu",
+            "skipped, %llu without a decal, %llu pixels a frame, %llu with his pixels masked | game frames %llu, "
+            "with a shadow %llu, samples without their frame %llu",
             static_cast<unsigned long long>(mDevice.Frame()), draws.size(), static_cast<double>(opacity),
             static_cast<double>(shadow.Selected->Height), static_cast<unsigned long long>(shadow.Frames),
             static_cast<unsigned long long>(shadow.Meshes), static_cast<unsigned long long>(shadow.Skipped),
             static_cast<unsigned long long>(shadow.Unavailable),
             static_cast<unsigned long long>(shadow.Pixels / std::max<uint64_t>(shadow.Frames, 1U)),
+            static_cast<unsigned long long>(shadow.Masked),
             static_cast<unsigned long long>(bridgeCounters.Published),
             static_cast<unsigned long long>(bridgeCounters.WithShadow),
             static_cast<unsigned long long>(bridgeCounters.SamplesWithoutFrame));

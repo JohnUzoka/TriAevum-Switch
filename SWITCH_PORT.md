@@ -1120,6 +1120,28 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   surfaces there, the facing from neighbouring pixels); its TestScreenRect expectations follow the radius 45.
   Console check: the balcony and the Zora's Fountain ledge, the shadow reaching his boots; `shadow_decal_ms`.
 
+### Simple shadow: off Link's own pixels, by a stencil mask (user, 0.2.6-test.3, 11/14)
+- **Seen:** "the shadow still sits just on Link's toes": the known side effect of the raised-floor rule (4afe34cd):
+  inside his "not Link" cylinder an up-facing receiver up to 6 above him counts as floor, and his boot tops are one.
+- **Fix: his pixels are masked.** His opaque draws (those the silhouette captures) set stencil bit 0x80
+  (`kPlayerShadowMaskBit`) where they pass the depth test, when the draw leaves the stencil alone. The frame's depth
+  reset draw writes the bit to 0 on the words it rewrites anyway (the reset clear with `config/deko3d_clear_draw`,
+  a fill or a clear zeroing the stencil count too). The decal samples the target's stencil through a
+  `DkDsSource_Stencil` view and darkens none of his pixels, whatever their height or facing, except the translucent
+  floor's points in front of them (water at his legs). With the mask the cylinder and the raised-floor rule are off,
+  so the floor beside his boots and a step up to his knees take the shadow. They remain the fallback: a frame where
+  a game draw uses bit 0x80 (none did in logs34-43), no reset cleared the bit on that target, or no descriptor slot
+  was free. deko3d.txt's `shadow:` line counts the decals drawn with the mask. Opaque things drawn in front of him
+  after him keep the bit at his pixels (they take no shadow there).
+- **Cost:** no pass added; a stencil write on his ~18 draws and on the reset draw, one stencil read in the decal
+  (DKSH 3840 B). Not measured. [INFERENCE] the stencil half of the compressed Z24S8 is readable after
+  `dkCmdBufResolveDepthValues`: if his boots darken again or holes appear in the ground shadow next to him, that
+  read is the suspect.
+- **Test:** `oot3d_player_shadow_tests` (TestDecal: the toe with and without the mask, his body, the planks, a step
+  beside his feet, the water's point). Console check: Kokiri Forest standing, walking, jumping (no shadow on his
+  boots, the shadow meeting his soles); the treehouse planks by his feet shaded; the masked count close to the
+  frame count.
+
 ### Simple shadow: Link took his own shadow while running (player report, 0.2.5, 11/13)
 - **Seen:** "Link's shadow casts on himself" (two screenshots, Kokiri Forest). Running, everything below his
   cap is at 0.4-0.5 of its colour, the decal's darkness; in the air in the other shot he is normal. The cap,

@@ -538,9 +538,20 @@ inline constexpr float kPlayerShadowDecalFade = 10.0F;         // units at the h
 // points of the floor): the share of it taken for his body falls from 8.8% to
 // 2.8% in Kokiri Forest, 19% to 3.2% in Kakariko, 20% to 5.1% in the Lost
 // Woods, 3.6% to 0.5% at Zora's Fountain, most of it by 4. His body there is
-// upright; only the tops of his toes face up (they take his shadow now).
+// upright; only the tops of his toes face up (they took his shadow, user
+// 0.2.6-test.3 "the shadow still sits just on Link's toes").
+//
+// So the renderer masks his own pixels instead (LinkMasked): his captured
+// opaque draws set kPlayerShadowMaskBit where they pass, the target's depth
+// reset of the frame clears it, and the decal reads the target's stencil and
+// darkens none of his pixels, whatever their height or facing. The cylinder
+// and the raised floor are the fallback for a frame without the mask (a game
+// draw of the frame uses the bit, no reset cleared it, no stencil slot).
 inline constexpr float kPlayerShadowDecalFloorRelief = 6.0F;
 inline constexpr float kPlayerShadowDecalFloorFacing = 0.9F;
+// The top stencil bit: in the console sessions with the stencil bookkeeping of
+// 0.2.3 (logs34-43) no game draw used it ("0 frames without the stencil bit").
+inline constexpr uint8_t kPlayerShadowMaskBit = 0x80U;
 // The receivers' height range above the plane: a step down this deep, a wall
 // this high (his head is about 50 up). Its box sets the screen rectangle.
 inline constexpr float kPlayerShadowDecalBelow = 45.0F;
@@ -599,6 +610,8 @@ struct PlayerShadowDecal {
     // (Eye) is above it.
     std::optional<PlayerShadowTranslucentFloor> Floor;
     std::array<float, 3> Eye{};
+    // His own pixels are masked (kPlayerShadowMaskBit): no cylinder.
+    bool LinkMasked = false;
 };
 
 [[nodiscard]] inline std::optional<PlayerShadowDecal> PlayerShadowDecalOf(
@@ -694,6 +707,7 @@ struct PlayerShadowDecalReceiver {
 // it takes no shadow. `facing`: the point's surface normal, any length or sign
 // (PlayerShadowDecalFacing); zero or not finite is not a floor. `onFloor`: the
 // translucent floor's point (PlayerShadowDecalReceiver), never his body.
+// `linkPixel`: the pixel holds his mask's bit (decal.LinkMasked).
 struct PlayerShadowDecalHit {
     std::array<float, 2> Uv{};
     float Strength = 1.0F;
@@ -709,7 +723,7 @@ struct PlayerShadowDecalHit {
 }
 [[nodiscard]] inline std::optional<PlayerShadowDecalHit> PlayerShadowDecalLookup(
     const PlayerShadowDecal& decal, const std::array<float, 3>& point, const std::array<float, 3>& facing,
-    bool onFloor = false) noexcept {
+    bool onFloor = false, bool linkPixel = false) noexcept {
     using namespace PlayerShadowDetail;
     const Vec3 relative{point[0] - decal.Origin[0], point[1] - decal.Origin[1], point[2] - decal.Origin[2]};
     const float height = Dot(relative, decal.Normal);
@@ -720,9 +734,11 @@ struct PlayerShadowDecalHit {
     const float up = Dot(fromLink, decal.Normal);
     const Vec3 sideways{fromLink[0] - up * decal.Normal[0], fromLink[1] - up * decal.Normal[1],
                         fromLink[2] - up * decal.Normal[2]};
+    if (!onFloor && decal.LinkMasked && linkPixel) return std::nullopt; // his own pixel
     if (!onFloor && Dot(sideways, sideways) < kPlayerShadowDecalLinkRadius * kPlayerShadowDecalLinkRadius &&
-        up > 1.0F && up < kPlayerShadowDecalLinkTall && !PlayerShadowDecalRaisedFloor(decal.Normal, facing, up))
-        return std::nullopt; // Link himself
+        up > 1.0F && up < kPlayerShadowDecalLinkTall && !decal.LinkMasked &&
+        !PlayerShadowDecalRaisedFloor(decal.Normal, facing, up))
+        return std::nullopt; // Link himself (no mask: his cylinder)
     const float along = height / decal.Rise;
     const Vec3 flat{relative[0] - decal.TowardLight[0] * along, relative[1] - decal.TowardLight[1] * along,
                     relative[2] - decal.TowardLight[2] * along};

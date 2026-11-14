@@ -210,6 +210,24 @@ void TestDecal() {
   Require(bootFacing && !PlayerShadowDecalLookup(*decal, beside, *bootFacing).has_value(),
           "decal: an upright surface there is his: none");
 
+  // 0.2.6-test.3 (user): "the shadow still sits just on Link's toes": the
+  // raised-floor rule took the tops of his boots for the floor. The renderer
+  // masks his own pixels (kPlayerShadowMaskBit) and drops the cylinder.
+  const Vec3 toe{-4.0F, 3.0F, 1.0F};
+  Require(PlayerShadowDecalLookup(*decal, toe, up).has_value(), "cylinder: the top of his toe took the shadow");
+  auto masked = *decal;
+  masked.LinkMasked = true;
+  Require(!PlayerShadowDecalLookup(masked, toe, up, false, true).has_value(), "mask: his toe's pixel takes none");
+  Require(!PlayerShadowDecalLookup(masked, {2.0F, 30.0F, 1.0F}, side, false, true).has_value(),
+          "mask: nor his body's");
+  Require(PlayerShadowDecalLookup(masked, plank, up).has_value(), "mask: the planks by his boots take it");
+  const Vec3 raisedStep{-10.0F, 10.0F, 0.0F};
+  Require(!PlayerShadowDecalLookup(*decal, raisedStep, up).has_value() &&
+              PlayerShadowDecalLookup(masked, raisedStep, up).has_value(),
+          "mask: a step 10 up beside his feet, which the cylinder took for him, takes it");
+  Require(PlayerShadowDecalLookup(masked, toe, up, true, true).has_value(),
+          "mask: the translucent floor's point in front of his pixel (water at his legs) takes it");
+
   // 0.2.5-test.4 (user): in the Temple of Time the shadow lay on the carpet
   // only. Its marble is drawn translucent without depth over mirrored walls,
   // so the scene's depth there is far under the floor.

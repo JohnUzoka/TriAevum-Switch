@@ -5,10 +5,11 @@
 // (PlayerShadowDecalWorldPoint), goes along the light into the silhouette and
 // darkens by it, under the rules of PlayerShadowDecalLookup (player_shadow.h):
 // only within the region's height range, not between Link and the light, not
-// Link himself, unless it is the floor drawn a little above the ground under
-// him. One bilinear tap of the silhouette gives the edge. Where the pixel's
-// ray crosses the scene's translucent floor (drawn without depth: the Temple
-// of Time's marble, the water under Link) before its point, the floor is the
+// on Link's own pixels (the stencil bit his draws set; without that mask, his
+// cylinder, unless it is the floor drawn a little above the ground under him).
+// One bilinear tap of the silhouette gives the edge. Where the pixel's ray
+// crosses the scene's translucent floor (drawn without depth: the Temple of
+// Time's marble, the water under Link) before its point, the floor is the
 // receiver (PlayerShadowDecalReceiverAt), at its opacity.
 layout(std140, binding = 0) uniform PlayerShadowDecal {
     mat4 clip_to_world;  // world = clip_to_world * (ndc x, ndc y, -depth, 1), then / w
@@ -19,7 +20,7 @@ layout(std140, binding = 0) uniform PlayerShadowDecal {
     vec4 along;          // xyz; w: the region's first along
     vec4 across;         // xyz; w: the region's first across
     vec4 extent;         // x: 1 / along length, y: 1 / across length, z: lowest height, w: highest
-    vec4 link;           // xyz: Link's position; w: his radius
+    vec4 link;           // xyz: Link's position; w: his radius, 0 when his pixels are masked
     vec4 middle;         // xyz: his middle; w: his height
     vec4 shade;          // x: opacity, y: the translucent floor's opacity, z: the fade's length, w: the raised floor's height
     vec4 eye;            // xyz: the camera; w: the translucent floor's height (none: lowest float)
@@ -27,6 +28,7 @@ layout(std140, binding = 0) uniform PlayerShadowDecal {
 };
 layout(binding = 0) uniform sampler2D silhouette;
 layout(binding = 1) uniform sampler2D scene_depth;
+layout(binding = 2) uniform usampler2D scene_stencil; // the target's stencil, kPlayerShadowMaskBit
 
 layout(location = 0) out vec4 shadow_out_color;
 
@@ -70,6 +72,8 @@ void main() {
         }
     }
     if (!on_floor && depth >= 1.0) discard;
+    // Link's own pixels (kPlayerShadowMaskBit): never his shadow.
+    if (link.w <= 0.0 && !on_floor && (texelFetch(scene_stencil, ivec2(gl_FragCoord.xy), 0).r & 0x80u) != 0u) discard;
 
     vec3 relative = p - origin.xyz;
     float height = dot(relative, normal.xyz);

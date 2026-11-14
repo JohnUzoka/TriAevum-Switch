@@ -467,8 +467,19 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         const DkShader* Fragment = nullptr;      // the silhouette's
         const DkShader* CoverVertex = nullptr;   // one triangle over the viewport
         const DkShader* DecalFragment = nullptr; // player_shadow_decal_fsh.glsl
-        // A texture slot per target (PicaTarget::Id) viewing its depth.
-        std::unordered_map<uint64_t, uint32_t> DepthSlots;
+        // Texture slots per target (PicaTarget::Id) viewing its depth and its
+        // stencil (Link's own pixels, kPlayerShadowMaskBit).
+        struct DepthStencilSlots {
+            uint32_t Depth = 0;
+            uint32_t Stencil = 0;
+        };
+        std::unordered_map<uint64_t, DepthStencilSlots> DepthSlots;
+        // Link's pixels mask (user 0.2.6-test.3: the shadow sat on his toes):
+        // his captured draws set kPlayerShadowMaskBit where they pass. The
+        // bit is cleared by the target's depth reset (or a fill or clear) of
+        // the frame: per target (PicaTarget::Id), the frame it was cleared.
+        std::unordered_map<uint64_t, uint64_t> MaskCleared;
+        bool StencilTaken = false; // a game draw of the frame uses the bit
         // The silhouette, drawn and then sampled at each draw point.
         DkMemBlock SilhouetteMemory = nullptr;
         DkImage SilhouetteImage{};
@@ -480,6 +491,7 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
         uint64_t Skipped = 0;
         uint64_t Unavailable = 0; // frames with his draws but no decal (no region, camera or depth slot)
         uint64_t Pixels = 0;      // of the decal's rectangles
+        uint64_t Masked = 0;      // decals that kept off his pixels by the mask (else the cylinder)
     };
     PlayerShadowState mPlayerShadow;
     // InitPica: the programs and the silhouette, and the bridge told whether
@@ -492,8 +504,16 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
                                  const Deko3d::PicaTarget& target, const PlayerShadowDraw& bound);
     // At a draw point into `target`: the captured draws, once per frame.
     void DrawPlayerShadow(Deko3d::PicaTarget& target);
-    // Method decal: the texture slot of `target`'s depth (kMaxImages when none is free).
-    uint32_t PlayerShadowDepthSlot(const Deko3d::PicaTarget& target);
+    // Method decal: the texture slots of `target`'s depth and stencil (Depth
+    // kMaxImages when none is free).
+    PlayerShadowState::DepthStencilSlots PlayerShadowDepthSlot(const Deko3d::PicaTarget& target);
+    // RecordPicaDraw: whether this draw is one of Link's that marks his
+    // pixels in kPlayerShadowMaskBit (its stencil state then set to).
+    bool MarksPlayerShadowPixels(const GfxNativePicaDrawView& draw, const Deko3d::PicaTarget& target);
+    // The target's depth reset, fill or clear has just cleared the bit.
+    void NotePlayerShadowMaskCleared(const Deko3d::PicaTarget& target);
+    // Whether the target's depth reset should clear the bit this frame.
+    [[nodiscard]] bool PlayerShadowMaskWanted() const;
     // Method texture, at a draw point: the draws flat into the silhouette,
     // whose target stays bound (the caller binds the scene target again).
     void DrawPlayerShadowSilhouette(const std::vector<PlayerShadowDraw>& draws);

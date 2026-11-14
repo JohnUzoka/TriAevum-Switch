@@ -275,6 +275,9 @@ void GfxRenderingAPIDeko3d::ApplyPicaFill(const GfxNativePicaMemoryFillView& fil
         const auto [depth, stencil] = DecodePicaClearDepthStencil(fill, key.DepthFormat);
         dkCmdBufClearDepthStencil(cmd, true, depth, PicaDepthFillClearsStencil(key.DepthFormat) ? 0xFF : 0x00,
                                   stencil);
+        if (PicaDepthFillClearsStencil(key.DepthFormat) && (stencil & Oot3d::kPlayerShadowMaskBit) == 0U) {
+            NotePlayerShadowMaskCleared(target); // config/simple_shadow: Link's mask bit
+        }
     }
     ++mCounters.PicaFills;
     mDevice.Checkpoint("fill", fill.StartPhysicalAddress, fill.EndPhysicalAddress);
@@ -600,7 +603,11 @@ bool GfxRenderingAPIDeko3d::RecordPicaDraw(const GfxNativePicaDrawView& draw, co
     depthStencil.depthWriteEnable = draw.DepthWriteEnabled;
     depthStencil.depthCompareOp =
         static_cast<DkCompareOp>(draw.DepthTestEnabled ? DekoCompareOp(draw.DepthCompare) : 8U);
-    depthStencil.stencilTestEnable = draw.Stencil.Enabled;
+    // config/simple_shadow: Link's own opaque draws set kPlayerShadowMaskBit
+    // where they pass, which keeps the decal off his pixels (user 0.2.6-test.3:
+    // the shadow sat on his toes). Only draws that leave the stencil alone.
+    const bool marksPlayer = MarksPlayerShadowPixels(draw, target);
+    depthStencil.stencilTestEnable = draw.Stencil.Enabled || marksPlayer;
     if (draw.Stencil.Enabled) {
         const auto fail = static_cast<DkStencilOp>(DekoStencilOp(draw.Stencil.Fail));
         const auto depthFail = static_cast<DkStencilOp>(DekoStencilOp(draw.Stencil.DepthFail));
@@ -617,6 +624,13 @@ bool GfxRenderingAPIDeko3d::RecordPicaDraw(const GfxNativePicaDrawView& draw, co
         dkCmdBufSetStencil(cmd, DkFace_FrontAndBack, static_cast<uint8_t>(draw.Stencil.WriteMask),
                            static_cast<uint8_t>(draw.Stencil.Reference),
                            static_cast<uint8_t>(draw.Stencil.CompareMask));
+    } else if (marksPlayer) {
+        depthStencil.stencilFrontFailOp = depthStencil.stencilBackFailOp = DkStencilOp_Keep;
+        depthStencil.stencilFrontDepthFailOp = depthStencil.stencilBackDepthFailOp = DkStencilOp_Keep;
+        depthStencil.stencilFrontPassOp = depthStencil.stencilBackPassOp = DkStencilOp_Replace;
+        depthStencil.stencilFrontCompareOp = depthStencil.stencilBackCompareOp = DkCompareOp_Always;
+        dkCmdBufSetStencil(cmd, DkFace_FrontAndBack, Oot3d::kPlayerShadowMaskBit, Oot3d::kPlayerShadowMaskBit,
+                           0xFF);
     }
     dkCmdBufBindDepthStencilState(cmd, &depthStencil);
 
@@ -762,6 +776,9 @@ bool GfxRenderingAPIDeko3d::RecordPicaDraw(const GfxNativePicaDrawView& draw, co
         LogPicaResetDraw(draw, plan);
         const auto action = mClearDraw ? plan.Action : Deko3d::PicaClearDrawAction::Draw;
         Deko3d::NoteResetDraw(static_cast<uint8_t>(action));
+        // config/simple_shadow: the reset also clears Link's mask bit (the
+        // depth and stencil words it rewrites anyway), before his draws mark it.
+        const bool clearsMask = PlayerShadowMaskWanted() && !draw.Stencil.Enabled;
         if (action != Deko3d::PicaClearDrawAction::Draw) {
             // The scissor is the target extent here (coversTarget), which
             // bounds the clears exactly as it bounds the draw; the bound
@@ -772,7 +789,9 @@ bool GfxRenderingAPIDeko3d::RecordPicaDraw(const GfxNativePicaDrawView& draw, co
             }
             // deko3d's ZcullClearDepth (0 or 1: its fast ZCULL clear) starts
             // ZCULL from a known state.
-            dkCmdBufClearDepthStencil(cmd, true, plan.ClearDepth, 0x00, 0);
+            dkCmdBufClearDepthStencil(cmd, true, plan.ClearDepth, clearsMask ? Oot3d::kPlayerShadowMaskBit : 0x00,
+                                      0);
+            if (clearsMask) NotePlayerShadowMaskCleared(target);
             mDevice.Checkpoint("draw.reset_clear");
             if (action == Deko3d::PicaClearDrawAction::FullClear) {
                 (void)key;
@@ -780,6 +799,15 @@ bool GfxRenderingAPIDeko3d::RecordPicaDraw(const GfxNativePicaDrawView& draw, co
             }
             depthStencil.depthWriteEnable = 0;
             dkCmdBufBindDepthStencilState(cmd, &depthStencil);
+        } else if (clearsMask) {
+            depthStencil.stencilTestEnable = 1;
+            depthStencil.stencilFrontFailOp = depthStencil.stencilBackFailOp = DkStencilOp_Replace;
+            depthStencil.stencilFrontDepthFailOp = depthStencil.stencilBackDepthFailOp = DkStencilOp_Replace;
+            depthStencil.stencilFrontPassOp = depthStencil.stencilBackPassOp = DkStencilOp_Replace;
+            depthStencil.stencilFrontCompareOp = depthStencil.stencilBackCompareOp = DkCompareOp_Always;
+            dkCmdBufSetStencil(cmd, DkFace_FrontAndBack, Oot3d::kPlayerShadowMaskBit, 0U, 0xFF);
+            dkCmdBufBindDepthStencilState(cmd, &depthStencil);
+            NotePlayerShadowMaskCleared(target);
         }
     }
 
@@ -1166,6 +1194,7 @@ bool GfxRenderingAPIDeko3d::ClearPicaRenderTarget(uint64_t renderTargetNamespace
         dkCmdBufSetScissors(cmd, 0, &scissor, 1);
         dkCmdBufClearColorFloat(cmd, 0, DkColorMask_RGBA, 0.0F, 0.0F, 0.0F, 0.0F);
         dkCmdBufClearDepthStencil(cmd, true, 1.0F, 0xFF, 0);
+        NotePlayerShadowMaskCleared(target); // config/simple_shadow: Link's mask bit
         ++target.Version;
         ++mCounters.PicaClears;
         mDevice.Checkpoint("clear", key.ColorAddress, key.DepthAddress);

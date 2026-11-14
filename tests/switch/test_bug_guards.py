@@ -3136,6 +3136,41 @@ GUARDS = [
           "arguments, Setup), so a first install starts with the same settings the old zip gave it",
           "tools/oot3d/native_game_runtime/oot3d_native_game.cpp",
           r'SeedConfigDefaults\("sdmc:/switch/oot3dre/config"\).*?PlaceSwitchMainThread\(\);.*?RunSwitchRomImport\(\)'),
+    Guard("0.2.6-test.3 (user): 'the shadow still sits just on Link's toes': the raised-floor rule took his boot "
+          "tops for the floor; his opaque draws mark his pixels in the stencil (only when the frame's depth reset "
+          "cleared the bit), and the reset clears it",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_draw.cpp",
+          r'const bool marksPlayer = MarksPlayerShadowPixels\(draw, target\);\s+'
+          r'depthStencil\.stencilTestEnable = draw\.Stencil\.Enabled \|\| marksPlayer;.*?'
+          r'\} else if \(marksPlayer\) \{.*?DkStencilOp_Replace;.*?DkCompareOp_Always;\s+'
+          r'dkCmdBufSetStencil\(cmd, DkFace_FrontAndBack, Oot3d::kPlayerShadowMaskBit, Oot3d::kPlayerShadowMaskBit,\s+0xFF\);.*?'
+          r'const bool clearsMask = PlayerShadowMaskWanted\(\) && !draw\.Stencil\.Enabled;.*?'
+          r'dkCmdBufClearDepthStencil\(cmd, true, plan\.ClearDepth, clearsMask \? Oot3d::kPlayerShadowMaskBit : 0x00,.*?'
+          r'\} else if \(clearsMask\) \{.*?dkCmdBufSetStencil\(cmd, DkFace_FrontAndBack, Oot3d::kPlayerShadowMaskBit, 0U, 0xFF\);.*?'
+          r'NotePlayerShadowMaskCleared\(target\);',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.6-test.3: the decal reads Link's mask from the target's stencil (a DkDsSource_Stencil view) and turns "
+          "the cylinder off (radius 0) only when his draws marked it this frame and no game draw uses the bit",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_player_shadow.cpp",
+          r'shadow\.StencilTaken = false;.*?'
+          r'\(\(draw\.Stencil\.WriteMask \| draw\.Stencil\.CompareMask\) & Oot3d::kPlayerShadowMaskBit\) != 0U\)\s+shadow\.StencilTaken = true;.*?'
+          r'return cleared != shadow\.MaskCleared\.end\(\) && cleared->second == mDevice\.Frame\(\);.*?'
+          r'view\.dsSource = DkDsSource_Stencil;.*?'
+          r'decal->LinkMasked = !shadow\.StencilTaken && slots\.Stencil < PicaResources::kMaxImages &&.*?'
+          r'put\(block\.Link, decal->Link, decal->LinkMasked \? 0\.0F : Oot3d::kPlayerShadowDecalLinkRadius\);.*?'
+          r'dkCmdBufBindTexture\(cmd, DkStage_Fragment, 2,\s+dkMakeTextureHandle\(decal->LinkMasked \? slots\.Stencil : slots\.Depth',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.6-test.3: the decal's shader keeps off Link's own pixels (the mask bit), not the translucent floor's point",
+          "tools/oot3d/deko3d_shadow/player_shadow_decal_fsh.glsl",
+          r'layout\(binding = 2\) uniform usampler2D scene_stencil;.*?'
+          r'if \(link\.w <= 0\.0 && !on_floor && \(texelFetch\(scene_stencil, ivec2\(gl_FragCoord\.xy\), 0\)\.r & 0x80u\) != 0u\) discard;',
+          "oot3d_player_shadow_tests (TestDecal)"),
+    Guard("0.2.6-test.3: the host model of the mask: his pixel takes none, the cylinder only without the mask",
+          "runtime/three_ds_recomp/include/fast/oot3d/player_shadow.h",
+          r'inline constexpr uint8_t kPlayerShadowMaskBit = 0x80U;.*?'
+          r'if \(!onFloor && decal\.LinkMasked && linkPixel\) return std::nullopt;.*?'
+          r'up < kPlayerShadowDecalLinkTall && !decal\.LinkMasked &&',
+          "oot3d_player_shadow_tests (TestDecal)"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay
