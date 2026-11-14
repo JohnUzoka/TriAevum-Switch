@@ -1070,6 +1070,21 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   surfaces there, the facing from neighbouring pixels); its TestScreenRect expectations follow the radius 45.
   Console check: the balcony and the Zora's Fountain ledge, the shadow reaching his boots; `shadow_decal_ms`.
 
+### Simple shadow: Link took his own shadow while running (player report, 0.2.5, 11/13)
+- **Seen:** "Link's shadow casts on himself" (two screenshots, Kokiri Forest). Running, everything below his
+  cap is at 0.4-0.5 of its colour, the decal's darkness; in the air in the other shot he is normal. The cap,
+  above his middle on the light's side, is spared by the "between him and the light" rule.
+- **Cause:** the shadow frame was published from the render command. On the Switch that command runs on the
+  render worker while the guest runs the next step, and it read the hook's decision by reference: the renderer
+  got Link's position from a later step than the frame's meshes whenever the guest had already drawn that step.
+  The 18-unit "not Link" cylinder then led his body by a step of his motion, and his back took his own shadow.
+  It was also a race on `SimpleShadowRuntime`. [INFERENCE from the screenshots' colour ratios and the code.]
+- **Fix:** the frame's decision is taken on the game thread when the frame completes (as the grass colliders
+  are) and handed to the render command by value. No change to the decal, no GPU cost.
+- **Check:** run and jump in Kokiri Forest and Hyrule Field at 60 FPS: his back and boots keep their colour; the
+  ground shadow stays at his feet. If his back still darkens in some frames, the follow-up is a capsule from his
+  previous frame's position.
+
 ### Simple shadow: the Temple of Time's marble had none (user, 0.2.5-test.4, 11/13)
 - **Seen:** "in the Temple of Time Link's shadow is not showing on the floor, only the carpet" (no clip; logs48 has
   scene 0x43 rooms 0 and 1).

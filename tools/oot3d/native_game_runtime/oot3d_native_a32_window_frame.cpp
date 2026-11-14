@@ -4165,6 +4165,12 @@ void NativeA32WindowSession::PresentVisualFrame(
         std::shared_ptr<std::vector<Oot3dNativeGame::Oot3dPicaVisualFrame>>
             supersededFrames;
         std::vector<Fast::Oot3d::GrassInteractor> frameActors;
+        // config/simple_shadow: Link's decision for the completed frame, taken
+        // here on the game thread as frameActors is. Read in the render
+        // command, the worker took it after the guest had run on (a later
+        // step's position: his body left the shadow's "not Link" cylinder
+        // and took his own shadow, user 0.2.5) and raced the hook.
+        std::optional<Fast::Oot3d::PlayerShadowFrame> frameShadow;
         bool suppressTopScreenBackdrop = false;
         // The TopScreen pause menu at its own cadence: with a page up, this
         // host frame's in-between frame shows the step image again
@@ -4227,6 +4233,7 @@ void NativeA32WindowSession::PresentVisualFrame(
                   finished->Sequence);
             }
             ++visualStats.SnapshotCount;
+            frameShadow = simpleShadow.FrameForPublish();
             suppressTopScreenBackdrop = relocatedFrontend;
             completedFrame =
                 std::make_shared<Oot3dNativeGame::Oot3dPicaVisualFrame>(
@@ -4235,7 +4242,7 @@ void NativeA32WindowSession::PresentVisualFrame(
           }
         }
         renderStream.Submit([&, topSelection, completedFrame, supersededFrames,
-                             frameActors, suppressTopScreenBackdrop, topScreenMenuHold,
+                             frameActors, frameShadow, suppressTopScreenBackdrop, topScreenMenuHold,
                              presentationElapsedSeconds,
                              visualInterpolationAlpha, frameCount = frameCount,
                              guestReferences =
@@ -4314,7 +4321,7 @@ void NativeA32WindowSession::PresentVisualFrame(
             Fast::Oot3d::GrassInteractionBridge::Instance().PublishFrame(
                 currentVisualFrame->Sequence, frameActors);
             Fast::Oot3d::PlayerShadowBridge::Instance().PublishFrame(
-                currentVisualFrame->Sequence, simpleShadow.FrameForPublish());
+                currentVisualFrame->Sequence, frameShadow);
             selectedNewVisualFrame = true;
             renderFrameKind =
                 static_cast<uint8_t>(Oot3dNativeGame::RenderFrameKind::Step);

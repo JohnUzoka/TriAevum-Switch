@@ -2542,12 +2542,17 @@ GUARDS = [
           r'if \(simpleShadow\.Pending\(\)\) return SaveStateOutcome::Deferred;.*?simpleShadow\.Reset\(\);',
           "oot3d_simple_shadow_tests (TestHook)"),
     Guard("Simple shadow: each native frame's shadow goes to the renderer with that frame, and the drawn sample "
-          "selects it",
+          "selects it; taken on the game thread at the frame's completion (user 0.2.5: read in the render "
+          "command, a later step's position put his body out of the 'not Link' cylinder and he took his own "
+          "shadow)",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
-          r'PlayerShadowBridge::Instance\(\)\.PublishFrame\(\s+currentVisualFrame->Sequence, '
-          r'simpleShadow\.FrameForPublish\(\)\);.*?'
+          r'std::optional<Fast::Oot3d::PlayerShadowFrame> frameShadow;.*?'
+          r'\+\+visualStats\.SnapshotCount;\s+frameShadow = simpleShadow\.FrameForPublish\(\);.*?'
+          r'renderStream\.Submit\(\[&, [^\]]*frameShadow[^\]]*\].*?'
+          r'PlayerShadowBridge::Instance\(\)\.PublishFrame\(\s+currentVisualFrame->Sequence, frameShadow\);.*?'
           r'PlayerShadowBridge::Instance\(\)\.SelectSample\(temporalSample\);',
-          "oot3d_player_shadow_tests (TestBridge)"),
+          "oot3d_player_shadow_tests (TestBridge)",
+          forbid=r'PublishFrame\(\s+currentVisualFrame->Sequence, simpleShadow\.FrameForPublish'),
     Guard("logs39: the simple shadow dropped out on about one completed frame in three (the game's foot spots "
           "flashed in its place): Link's latest decision, a refusal included, serves each completed frame "
           "until the next one, for at most kSimpleShadowFrameLifetime frames",
