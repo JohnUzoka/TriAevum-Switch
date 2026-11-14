@@ -142,19 +142,6 @@ class Oot3dDisplayConfirmationWindow final : public Ship::GuiWindow {
     void DrawElement() override {}
 };
 
-class Oot3dHostNoticeWindow final : public Ship::GuiWindow {
-  public:
-    Oot3dHostNoticeWindow() : GuiWindow("", false, "Host notice") {}
-    void Draw() override {
-        SetVisibility(Oot3d::HostNoticeActive());
-        Oot3d::DrawHostNotice();
-    }
-  protected:
-    void InitElement() override {}
-    void UpdateElement() override {}
-    void DrawElement() override {}
-};
-
 
 struct Oot3dMousePosition {
     float X = 0.0F;
@@ -230,6 +217,28 @@ ImGuiMouseSource Oot3dMouseSource(uint32_t which) {
     return which == SDL_TOUCH_MOUSEID ? ImGuiMouseSource_TouchScreen
                                       : ImGuiMouseSource_Mouse;
 }
+#endif
+#if defined(ENABLE_OOT3D_VULKAN) || defined(__SWITCH__)
+// Host notices (savestates, "Version X is available") over the game. The
+// window stays "not visible" for Ship::Gui: a visible window counts as open
+// host UI, and the game then lost the controller, keyboard and touch for
+// the notice's seconds (and PC the mouse capture).
+class Oot3dHostNoticeWindow final : public Ship::GuiWindow {
+  public:
+    Oot3dHostNoticeWindow() : GuiWindow("", false, "Host notice") {}
+    void Draw() override {
+#if defined(__SWITCH__)
+        // Readable on a TV, the debug menu's font scale (1080p: twice).
+        Oot3d::DrawHostNotice(std::max(1.0F, ImGui::GetMainViewport()->WorkSize.y / 540.0F));
+#else
+        Oot3d::DrawHostNotice();
+#endif
+    }
+  protected:
+    void InitElement() override {}
+    void UpdateElement() override {}
+    void DrawElement() override {}
+};
 #endif
 #if defined(__SWITCH__)
 // deko3d has no SDL window, so no ImGui platform backend and no SDL events
@@ -394,8 +403,10 @@ void Fast3dGui::Init(GuiWindowInitData windowImpl) {
             std::make_shared<Oot3dGraphicsSettingsPersistence>());
         AddGuiWindow(std::make_shared<Oot3dGraphicsSettingsWindow>());
         AddGuiWindow(std::make_shared<Oot3dDisplayConfirmationWindow>());
-        AddGuiWindow(std::make_shared<Oot3dHostNoticeWindow>());
     }
+#endif
+#if defined(ENABLE_OOT3D_VULKAN) || defined(__SWITCH__)
+    AddGuiWindow(std::make_shared<Oot3dHostNoticeWindow>());
 #endif
 #if defined(__SWITCH__)
     AddGuiWindow(std::make_shared<Oot3dDebugMenuWindow>());

@@ -1012,6 +1012,9 @@ bool NativeA32WindowSession::RunFrame() {
   Fast::Renderer3ds::SlowStepTrace hostStartSteps("host_frame_start");
   window.GetMouseStateManager()->StartFrame();
   hostStartSteps.Mark("mouse");
+  // The preparation screen hides the ImGui windows under it: a notice posted
+  // meanwhile (the launch update check) waits for the game to show.
+  Fast::Oot3d::SetHostNoticesCovered(preparationScreen.CoversFrame());
   gui->StartDraw();
   hostStartSteps.Mark("gui_start_draw");
   // config/second_core: the host frame start below (overlay, input polling,

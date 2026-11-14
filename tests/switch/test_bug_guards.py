@@ -3060,6 +3060,22 @@ GUARDS = [
           r'if \(value\(1\) != surface\) return std::nullopt;.*?'
           r'if \(frame && frame->Water\)\s+if \(const auto box =\s+ReadSimpleShadowWaterBox\(',
           "oot3d_simple_shadow_tests (TestWater)"),
+    Guard("Host notices (update available, savestates) never drawn on Switch: the window was Vulkan-only",
+          "runtime/three_ds_recomp/src/fast/Fast3dGui.cpp",
+          r'#if defined\(ENABLE_OOT3D_VULKAN\) \|\| defined\(__SWITCH__\)\s+AddGuiWindow\(std::make_shared<Oot3dHostNoticeWindow>\(\)\);',
+          "oot3d_host_notice_tests"),
+    Guard("A host notice counted as open host UI: the game lost the controller/touch while it showed",
+          "runtime/three_ds_recomp/src/fast/Fast3dGui.cpp",
+          r'class Oot3dHostNoticeWindow final : public Ship::GuiWindow \{(?:(?!SetVisibility)(?!\n\};).)*?Oot3d::DrawHostNotice\(',
+          "oot3d_host_notice_tests"),
+    Guard("Launch update notice timed out behind the preparation screen (time ran from the post)",
+          "runtime/three_ds_recomp/include/fast/oot3d/host_notice.h",
+          r'if \(mWaiting\) \{\s+if \(covered\) return false;\s+mWaiting = false;\s+mUntil = now \+ mDuration;',
+          "oot3d_host_notice_tests"),
+    Guard("Host notices not held while the preparation screen covers the frame",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
+          r'Fast::Oot3d::SetHostNoticesCovered\(preparationScreen\.CoversFrame\(\)\);\s+gui->StartDraw\(\);',
+          "oot3d_host_notice_tests"),
 ]
 
 # Native VFP overrides that cost more than the translation: they must stay

@@ -340,6 +340,12 @@ add_executable(oot3d_debug_menu_tests EXCLUDE_FROM_ALL
 target_link_libraries(oot3d_debug_menu_tests PRIVATE oot3d_renderer_contracts)
 oot3d_target_defaults(oot3d_debug_menu_tests FOLDER Tests)
 
+# Host notices' time from the first shown frame (host_notice.h).
+add_executable(oot3d_host_notice_tests EXCLUDE_FROM_ALL
+    tools/oot3d/native_game_runtime/oot3d_host_notice_tests.cpp)
+target_link_libraries(oot3d_host_notice_tests PRIVATE oot3d_renderer_contracts)
+oot3d_target_defaults(oot3d_host_notice_tests FOLDER Tests)
+
 # Reduced in-between path under the session's threads (run with ASan/TSan).
 add_executable(oot3d_native_reduced_replay_stress_tests EXCLUDE_FROM_ALL
     tools/oot3d/native_game_runtime/oot3d_native_reduced_replay_stress_tests.cpp

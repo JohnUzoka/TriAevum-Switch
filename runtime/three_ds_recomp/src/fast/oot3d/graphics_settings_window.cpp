@@ -2,7 +2,9 @@
 #include "fast/oot3d/grass_scene_bridge.h"
 #include "fast/oot3d/graphics_settings_runtime.h"
 #include "fast/oot3d/settings_panel_widgets.h"
+#include "fast/oot3d/host_notice.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iterator>
 #include <mutex>
@@ -82,55 +84,52 @@ void ToggleGraphicsNativePresentation() {
 }
 
 namespace {
-struct HostNotice {
-    std::string Text;
-    bool Failure = false;
-    std::chrono::steady_clock::time_point Until{};
-};
 std::mutex& HostNoticeMutex() {
     static std::mutex mutex;
     return mutex;
 }
-HostNotice& CurrentHostNotice() {
-    static HostNotice notice;
+HostNoticeTimer& CurrentHostNotice() {
+    static HostNoticeTimer notice;
     return notice;
+}
+std::atomic<bool>& HostNoticesCovered() {
+    static std::atomic<bool> covered{false};
+    return covered;
 }
 } // namespace
 
 void PostHostNotice(std::string text, bool failure, std::chrono::seconds duration) {
     std::scoped_lock lock(HostNoticeMutex());
-    auto& notice = CurrentHostNotice();
-    notice.Text = std::move(text);
-    notice.Failure = failure;
-    // Failures stay longer: they point the player at F1.
-    if (duration <= std::chrono::seconds::zero()) duration = std::chrono::seconds(failure ? 8 : 3);
-    notice.Until = std::chrono::steady_clock::now() + duration;
+    CurrentHostNotice().Post(std::move(text), failure, duration);
 }
 
-bool HostNoticeActive() {
+void SetHostNoticesCovered(bool covered) {
+    HostNoticesCovered().store(covered, std::memory_order_relaxed);
+}
+
+void DrawHostNotice(float fontScale) {
+    // Drawn under the lock: no copy of the text each frame.
     std::scoped_lock lock(HostNoticeMutex());
-    return std::chrono::steady_clock::now() < CurrentHostNotice().Until;
-}
-
-void DrawHostNotice() {
-    HostNotice notice;
-    {
-        std::scoped_lock lock(HostNoticeMutex());
-        notice = CurrentHostNotice();
+    auto& notice = CurrentHostNotice();
+    if (!notice.Show(std::chrono::steady_clock::now(),
+                     HostNoticesCovered().load(std::memory_order_relaxed))) {
+        return;
     }
-    if (std::chrono::steady_clock::now() >= notice.Until) return;
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + 16.0F, viewport->WorkPos.y + 16.0F),
                             ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.75F);
+    // NoInputs/NoNav/NoFocusOnAppearing: the notice never takes the focus,
+    // the mouse or the controller's navigation from the game or a menu.
     constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
     if (ImGui::Begin("##TriAevumHostNotice", nullptr, flags)) {
-        if (notice.Failure) {
-            ImGui::TextColored(ImVec4(1.0F, 0.45F, 0.4F, 1.0F), "%s", notice.Text.c_str());
+        ImGui::SetWindowFontScale(fontScale);
+        if (notice.Failure()) {
+            ImGui::TextColored(ImVec4(1.0F, 0.45F, 0.4F, 1.0F), "%s", notice.Text().c_str());
         } else {
-            ImGui::TextUnformatted(notice.Text.c_str());
+            ImGui::TextUnformatted(notice.Text().c_str());
         }
     }
     ImGui::End();

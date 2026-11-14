@@ -893,6 +893,24 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   changed meanwhile, nothing is sent). A is no longer kept from the game.
 - **Test:** `oot3d_top_screen_mod_profile_tests` (TestPicker, the log lines).
 
+### Update-available notice without opening the menu (user, 11/13)
+- **Seen:** "it shows in the debug menu but there is no popup if you don't open it": the launch update check
+  found the new version (L3+R3 > Updates had it), but the "Version X is available: L3+R3 > Updates" notice never
+  showed. Savestate notices didn't show either.
+- **Cause:** the host notice window (`Oot3dHostNoticeWindow`, Fast3dGui.cpp) was registered for the Vulkan
+  backend only. On the Switch ImGui runs every frame anyway, so the window was the only missing piece. Two more
+  problems would have hidden or broken it: the window made itself "visible" while a notice was active, so
+  Ship::Gui counted it as open host UI and the game would lose the controller, touch and motion for the
+  notice's seconds; and the notice's time ran from the post, while the check ends about 1 s after start under
+  the opaque renderer preparation screen, so 10 s could pass unseen.
+- **Fix:** the window is registered for Vulkan and the Switch (deko3d and GL) and stays not visible to Ship::Gui
+  (its flags already take no input, focus or navigation); on the Switch it draws at the debug menu's font
+  scale. `HostNoticeTimer` (fast/oot3d/host_notice.h) starts a notice's time at the first frame that shows it;
+  `RunFrame` marks notices as covered while `NativePreparationScreen::CoversFrame()`. With no notice the cost
+  is one lock and a check per frame, and nothing is drawn.
+- **Tests:** `oot3d_host_notice_tests`. Console check: launch with a newer release on the channel; the notice
+  shows after the preparation screen for 10 s, top left, and the controller keeps working meanwhile.
+
 ### Items put on the D-pad with Hold A froze the game when used (issue #13, 11/13)
 - **Seen (reporter, 0.2.4):** "the items can be attached to the d-pad holding A but the game freezes when using those
   items; mapping items to the d-pad from the port menu works fine". No log, no item or age named.

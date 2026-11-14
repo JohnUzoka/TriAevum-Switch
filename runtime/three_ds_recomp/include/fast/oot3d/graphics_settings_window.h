@@ -20,12 +20,17 @@ namespace Fast::Oot3d {
 void DrawDisplayConfirmation();
 
 // A short host notice (for example the result of a hotkey action) shown for a
-// few seconds outside F1 (3, a failure 8, or `duration`). A later notice
-// replaces the current one.
+// few seconds outside F1 and the console's debug menu (3, a failure 8, or
+// `duration`, from the first frame that shows it: host_notice.h). A later
+// notice replaces the current one.
 void PostHostNotice(std::string text, bool failure = false,
                     std::chrono::seconds duration = std::chrono::seconds::zero());
-[[nodiscard]] bool HostNoticeActive();
-void DrawHostNotice();
+// While a screen covers the game (the renderer preparation screen), a posted
+// notice waits and its time does not run. The host frame sets this before
+// the ImGui frame.
+void SetHostNoticesCovered(bool covered);
+// Takes no input or focus; `fontScale` as the window the build draws around.
+void DrawHostNotice(float fontScale = 1.0F);
 
 // The F1 groups that application tabs can join. Lighting is a built-in tab;
 // other group names become top-level tabs in the order they first appear.
