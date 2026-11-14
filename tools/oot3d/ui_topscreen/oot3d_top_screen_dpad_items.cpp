@@ -144,12 +144,14 @@ bool ReadTopScreenDpadItemPickerState(NativeA32Memory &memory,
   if (state == nullptr)
     return false;
   TopScreenDpadItemPickerState result;
-  std::uint32_t pageState = 0U, age = 0U;
+  std::uint32_t pageState = 0U, age = 0U, column = 0U, row = 0U;
   if (!memory.Read32(0x0050672CU, &pageState) ||
       !memory.Read32(0x00506748U, &result.Position) ||
       !memory.Read32(0x0050674CU, &result.OtherPosition) ||
+      !memory.Read32(0x00506770U, &column) || !memory.Read32(0x00506774U, &row) ||
       !memory.Read32(kSaveContext + 0x04U, &age))
     return false;
+  result.Cursor = row * 6U + column;
   result.PageState = pageState;
   result.PickedUp = pageState == kTopScreenItemsPickedUp;
   result.Age = age != 0U ? 1U : 0U;
@@ -194,14 +196,52 @@ std::string DescribeTopScreenDpadItemPicker(const TopScreenDpadItemPickerState &
       : item == kTopScreenNoItem            ? "refused: no item a D-pad direction can hold"
                                             : "refused: the item is for the other age";
   constexpr const char *kDirections[]{"up", "down", "left", "right"};
-  char line[200];
+  char line[220];
   std::snprintf(line, sizeof(line),
-                "dpad picker: %s page_state=%u position=%d other_position=%d age=%s slot=%u "
-                "item=0x%02X item_age=%u: %s",
+                "dpad picker: %s page_state=%u position=%d other_position=%d cursor=%d age=%s "
+                "slot=%u item=0x%02X item_age=%u: %s",
                 direction >= 0 && direction < 4 ? kDirections[direction] : "A held",
                 state.PageState, static_cast<int>(state.Position), static_cast<int>(state.OtherPosition),
-                state.Age != 0U ? "child" : "adult", hovered, item, itemAge, outcome);
+                static_cast<int>(state.Cursor), state.Age != 0U ? "child" : "adult", hovered, item,
+                itemAge, outcome);
   return line;
+}
+
+TopScreenDpadItemPickerStep StepTopScreenDpadItemPicker(
+    TopScreenDpadItemPickerHold &hold, const TopScreenDpadItemPickerState *picker,
+    std::uint8_t slot, bool aHeld, const std::array<bool, 4> &held,
+    const std::array<bool, 4> &pressed) noexcept {
+  TopScreenDpadItemPickerStep step;
+  for (std::size_t direction = 0; direction < held.size(); ++direction) {
+    hold.Kept[direction] = hold.Kept[direction] && held[direction];
+    step.KeepFromGame[direction] = hold.Kept[direction];
+  }
+  if (picker != nullptr && hold.PutBack && !aHeld) {
+    if (!picker->PickedUp || picker->Position != *hold.PutBack) {
+      hold.PutBack.reset(); // the game dropped or moved it itself
+      hold.ReleaseSeen = false;
+    } else if (!hold.ReleaseSeen) {
+      hold.ReleaseSeen = true; // the game takes the release this refresh
+    } else {
+      // A here drops the item under the cursor: only back where it was.
+      step.Drop = picker->Cursor == picker->Position;
+      step.DropRefused = !step.Drop;
+      hold.PutBack.reset();
+      hold.ReleaseSeen = false;
+    }
+  }
+  if (picker != nullptr && aHeld && slot != kTopScreenDpadItemSlotNone) {
+    for (std::size_t direction = 0; direction < held.size(); ++direction) {
+      step.KeepFromGame[direction] = true;
+      hold.Kept[direction] = held[direction];
+      step.Take[direction] = pressed[direction];
+      if (pressed[direction]) {
+        hold.PutBack = picker->Position;
+        hold.ReleaseSeen = false;
+      }
+    }
+  }
+  return step;
 }
 
 void SettleTopScreenDpadItemHudState(TopScreenDpadItemGuestState &state,
@@ -213,16 +253,23 @@ void SettleTopScreenDpadItemHudState(TopScreenDpadItemGuestState &state,
     state.OcarinaRestricted = 0xFFU;
 }
 
+bool ReadTopScreenDpadItemRootState(NativeA32Memory &memory,
+                                    const std::array<std::uint8_t, 4> &childSlots,
+                                    const std::array<std::uint8_t, 4> &adultSlots,
+                                    TopScreenDpadItemGuestState *state) {
+  std::uint32_t play = 0U;
+  return state != nullptr && memory.Read32(kGameplayRoot + 0x0CU, &play) &&
+         ReadTopScreenDpadItemGuestState(memory, play, childSlots, adultSlots, state);
+}
+
 bool ReadTopScreenDpadItemUsability(NativeA32Memory &memory,
                                     const std::array<std::uint8_t, 4> &childSlots,
                                     const std::array<std::uint8_t, 4> &adultSlots,
                                     std::array<bool, 4> *usable) {
-  std::uint32_t play = 0U, touchFlags = 0U;
+  std::uint32_t touchFlags = 0U;
   TopScreenDpadItemGuestState state;
-  if (usable == nullptr || !memory.Read32(kGameplayRoot + 0x0CU, &play) ||
-      !memory.Read32(kTopScreenTouchFlags, &touchFlags) ||
-      !ReadTopScreenDpadItemGuestState(memory, play, childSlots, adultSlots,
-                                       &state))
+  if (usable == nullptr || !memory.Read32(kTopScreenTouchFlags, &touchFlags) ||
+      !ReadTopScreenDpadItemRootState(memory, childSlots, adultSlots, &state))
     return false;
   SettleTopScreenDpadItemHudState(state, touchFlags);
   for (std::size_t direction = 0; direction < usable->size(); ++direction)
@@ -329,6 +376,44 @@ std::uint8_t ResolveTopScreenDpadItem(const TopScreenDpadItemGuestState &state,
                  : static_cast<std::uint8_t>(state.HeldItemAction + 47U);
   }
   return item;
+}
+
+std::string DescribeTopScreenDpadItemPress(const TopScreenDpadItemGuestState &state,
+                                           std::size_t direction) {
+  constexpr const char *kDirections[]{"up", "down", "left", "right"};
+  if (direction >= state.Slots.size())
+    return "dpad item: no such direction";
+  const unsigned slot = state.Slots[direction];
+  const unsigned slotItem = TopScreenDpadSlotItem(state.Inventory, state.Slots[direction]);
+  const unsigned itemAge = slotItem <= 61U ? state.ItemAge[slotItem] : 0xFFU;
+  const unsigned item = ResolveTopScreenDpadItem(state, direction);
+  std::array<bool, 4> lane{};
+  lane[direction] = true;
+  const unsigned button = ResolveTopScreenDpadItemButton(state, lane, false);
+  char line[320];
+  std::snprintf(line, sizeof(line),
+                "dpad item: %s pressed slot=%u slot_item=0x%02X age=%s item_age=%u play=%d "
+                "player=%d pause=%u busy=%u flags1=0x%08X flags2=0x%08X held_button=%u "
+                "held_action=%u special=%d mode=0x%04X statuses=%02X%02X%02X%02X: item=0x%02X "
+                "button=%u (%s)",
+                kDirections[direction], slot, slotItem, state.Age != 0U ? "child" : "adult",
+                itemAge, state.HasPlay ? 1 : 0, state.HasPlayer ? 1 : 0,
+                static_cast<unsigned>(state.PauseState),
+                static_cast<unsigned>(state.GameplayRootBusy),
+                static_cast<unsigned>(state.StateFlags1), static_cast<unsigned>(state.StateFlags2),
+                state.HeldItemButton, state.HeldItemAction, state.SpecialState,
+                state.InterfaceMode, state.ButtonStatus[0], state.ButtonStatus[1],
+                state.ButtonStatus[2], state.ButtonStatus[3], item, button,
+                button != 0U ? "the press scan takes it" : "refused");
+  return line;
+}
+
+std::string DescribeTopScreenDpadItemResolve(std::uint32_t button, std::uint8_t item,
+                                             bool holdScan) {
+  char line[96];
+  std::snprintf(line, sizeof(line), "dpad item: button=%u %s scan resolved item=0x%02X",
+                static_cast<unsigned>(button), holdScan ? "hold" : "press", item);
+  return line;
 }
 
 std::uint32_t ResolveTopScreenDpadItemButton(

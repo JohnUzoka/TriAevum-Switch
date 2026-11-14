@@ -3008,37 +3008,35 @@ bool NativeA32WindowSession::UpdateGuestServicesForRefresh(
     // the A press picks the item up (the game's state 8); while A is held a
     // direction takes that item and is kept from the game, whose cursor so
     // stays on it. After the release one A press of the port's own drops the
-    // item where it was, and the page browses again.
+    // item where it was, and the page browses again. A direction held while
+    // A took the item stays kept from the game until it is released, and the
+    // drop is sent only with the cursor still on the item (issue #13
+    // follow-up: a direction released after A moved the cursor, and the drop
+    // put the item into another cell or onto X/Y/I/II).
     const auto aMask = button(Oot3dNativeGame::NativeA32HidButton::A);
     constexpr std::array<Oot3dNativeGame::NativeA32HidButton, 4> kPickerDirections{
         Oot3dNativeGame::NativeA32HidButton::DpadUp,
         Oot3dNativeGame::NativeA32HidButton::DpadDown,
         Oot3dNativeGame::NativeA32HidButton::DpadLeft,
         Oot3dNativeGame::NativeA32HidButton::DpadRight};
-    static std::optional<std::uint32_t> pickerPutBack;
-    static bool pickerReleaseSeen = false;
+    static Oot3dNativeGame::TopScreenDpadItemPickerHold pickerHold;
+    static int pickerLogLines = 0;
     const bool aHeld = (buttons & aMask) != 0U;
-    Oot3dNativeGame::TopScreenDpadItemPickerState picker;
-    const bool pickerRead = topScreenConfigRuntime != nullptr && (aHeld || pickerPutBack) &&
-        Oot3dNativeGame::ReadTopScreenDpadItemPickerState(process.Memory(), &picker);
-    if (pickerRead && pickerPutBack && !aHeld) {
-      if (!picker.PickedUp || picker.Position != *pickerPutBack) {
-        pickerPutBack.reset();
-        pickerReleaseSeen = false;
-      } else if (!pickerReleaseSeen) {
-        pickerReleaseSeen = true; // the game takes the release this frame
-      } else {
-        inputFrame.Hid.Buttons |= aMask;
-        pickerPutBack.reset();
-        pickerReleaseSeen = false;
-      }
+    std::array<bool, 4> directionsHeld{}, directionsPressed{};
+    for (std::size_t direction = 0U; direction < kPickerDirections.size(); ++direction) {
+      directionsHeld[direction] = (buttons & button(kPickerDirections[direction])) != 0U;
+      directionsPressed[direction] = (pressed & button(kPickerDirections[direction])) != 0U;
     }
+    Oot3dNativeGame::TopScreenDpadItemPickerState picker;
+    const bool pickerRead = topScreenConfigRuntime != nullptr &&
+        (aHeld || pickerHold.PutBack.has_value()) &&
+        Oot3dNativeGame::ReadTopScreenDpadItemPickerState(process.Memory(), &picker);
+    const auto slot = pickerRead ? Oot3dNativeGame::ResolveTopScreenDpadItemPickerSlot(picker)
+                                 : Oot3dNativeGame::kTopScreenDpadItemSlotNone;
     if (pickerRead && aHeld) {
-      const auto slot = Oot3dNativeGame::ResolveTopScreenDpadItemPickerSlot(picker);
       // Issue #13 (hold A did nothing): what the picker read, on the A press
       // and on each direction while A is held, on any pause page state but
       // the closed one; a few lines a session.
-      static int pickerLogLines = 0;
       if (picker.PageState != 0U && pickerLogLines < 30) {
         if ((pressed & aMask) != 0U) {
           Oot3dNativeGame::WriteGameLog(
@@ -3046,28 +3044,66 @@ bool NativeA32WindowSession::UpdateGuestServicesForRefresh(
           ++pickerLogLines;
         }
         for (std::size_t direction = 0U; direction < kPickerDirections.size(); ++direction) {
-          if ((pressed & button(kPickerDirections[direction])) == 0U) continue;
+          if (!directionsPressed[direction]) continue;
           Oot3dNativeGame::WriteGameLog(Oot3dNativeGame::DescribeTopScreenDpadItemPicker(
               picker, slot, static_cast<int>(direction)));
           ++pickerLogLines;
         }
       }
-      if (slot != Oot3dNativeGame::kTopScreenDpadItemSlotNone) {
-        for (std::size_t direction = 0U; direction < kPickerDirections.size(); ++direction) {
-          const auto mask = button(kPickerDirections[direction]);
-          inputFrame.Hid.Buttons &= ~mask;
-          if ((pressed & mask) == 0U) continue;
-          auto config = topScreenConfigRuntime->Snapshot().Config;
-          Oot3dNativeGame::AssignTopScreenDpadItem(config, picker.Age != 0U, direction, slot);
-          std::string pickerError;
-          if (!topScreenConfigRuntime->Apply(config, &pickerError))
-            topScreenConfigRuntime->Preview(config);
-          if (!Oot3dNativeGame::PlayTopScreenUiSound(process, 0x01000498U,
-                                                     kTopScreenDirectCallReturn, &pickerError))
-            throw std::runtime_error("TopScreen D-pad picker sound failed: " + pickerError);
-          pickerPutBack = picker.Position;
-          pickerReleaseSeen = false;
-        }
+    }
+    const auto pickerStep = Oot3dNativeGame::StepTopScreenDpadItemPicker(
+        pickerHold, pickerRead ? &picker : nullptr, slot, aHeld, directionsHeld,
+        directionsPressed);
+    for (std::size_t direction = 0U; direction < kPickerDirections.size(); ++direction) {
+      if (pickerStep.KeepFromGame[direction])
+        inputFrame.Hid.Buttons &= ~button(kPickerDirections[direction]);
+      if (!pickerStep.Take[direction]) continue;
+      auto config = topScreenConfigRuntime->Snapshot().Config;
+      Oot3dNativeGame::AssignTopScreenDpadItem(config, picker.Age != 0U, direction, slot);
+      std::string pickerError;
+      if (!topScreenConfigRuntime->Apply(config, &pickerError))
+        topScreenConfigRuntime->Preview(config);
+      if (!Oot3dNativeGame::PlayTopScreenUiSound(process, 0x01000498U,
+                                                 kTopScreenDirectCallReturn, &pickerError))
+        throw std::runtime_error("TopScreen D-pad picker sound failed: " + pickerError);
+    }
+    if (pickerStep.Drop) inputFrame.Hid.Buttons |= aMask;
+    if ((pickerStep.Drop || pickerStep.DropRefused) && pickerLogLines < 30) {
+      Oot3dNativeGame::WriteGameLog(
+          Oot3dNativeGame::DescribeTopScreenDpadItemPicker(picker, slot, -1) +
+          (pickerStep.Drop ? " (A released: drops it back)"
+                           : " (A released: the cursor left the item, no drop)"));
+      ++pickerLogLines;
+    }
+    // Issue #13 follow-up ("the game freezes when using those items", no log
+    // of the path): each D-pad item press in gameplay, what the rules read,
+    // and each item the slot resolver then gives a press scan. The last line
+    // before a freeze tells whether the game reached the item.
+    static int dpadItemLogLines = 0;
+    static std::uint64_t loggedDpadItemResolves = 0U;
+    if (!aHeld && dpadItemLogLines < 40) {
+      for (std::size_t direction = 0U; direction < kPickerDirections.size(); ++direction) {
+        if (!topScreenDpadItemHeld[direction] || !directionsPressed[direction]) continue;
+        Oot3dNativeGame::TopScreenDpadItemGuestState dpadState;
+        if (!Oot3dNativeGame::ReadTopScreenDpadItemRootState(
+                process.Memory(),
+                Oot3dNativeGame::TopScreenDpadItemSlots(activeTopScreenConfig, true),
+                Oot3dNativeGame::TopScreenDpadItemSlots(activeTopScreenConfig, false),
+                &dpadState) ||
+            dpadState.PauseState != 2U)
+          continue;
+        Oot3dNativeGame::WriteGameLog(
+            Oot3dNativeGame::DescribeTopScreenDpadItemPress(dpadState, direction));
+        ++dpadItemLogLines;
+      }
+    }
+    const auto &dpadItemDispatch = nativeCandidateDispatch.TopScreenItems;
+    if (dpadItemDispatch.DpadItemPressResolves != loggedDpadItemResolves) {
+      loggedDpadItemResolves = dpadItemDispatch.DpadItemPressResolves;
+      if (dpadItemLogLines < 40) {
+        Oot3dNativeGame::WriteGameLog(Oot3dNativeGame::DescribeTopScreenDpadItemResolve(
+            dpadItemDispatch.LastDpadItemButton, dpadItemDispatch.LastDpadItem, false));
+        ++dpadItemLogLines;
       }
     }
     if (topScreenDpadActions.WasPressed(

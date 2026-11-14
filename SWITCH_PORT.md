@@ -893,6 +893,30 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   changed meanwhile, nothing is sent). A is no longer kept from the game.
 - **Test:** `oot3d_top_screen_mod_profile_tests` (TestPicker, the log lines).
 
+### Items put on the D-pad with Hold A froze the game when used (issue #13, 11/13)
+- **Seen (reporter, 0.2.4):** "the items can be attached to the d-pad holding A but the game freezes when using those
+  items; mapping items to the d-pad from the port menu works fine". No log, no item or age named.
+- **Checked:** the picker stores what Controls > Shortcuts stores: the inventory slot with the action Item, read
+  through the same age grid the game swaps (`0x00434658`: `SaveContext + 0x13A2` when `linkAge == 0`, `+0x138A` for
+  the child; position = row * 6 + column). logs46's `position=16 age=adult slot=1 item=0x01 item_age=9` is the Deku
+  Nuts slot; `item_age=9` is `0x00506C58[1]`, both ages. After the assignment the hooks see the same config either
+  way. The freeze is not explained: not reproduced (no host build of the game, no log from the reporter).
+- **Found and fixed (picker only):** in Items state 8 the game moves its cursor (`0x005066F8 +0x78` column, `+0x7C`
+  row) with the D-pad (`0x002ED11C..`: Left from column 0 wraps to column 5, the X/Y/I/II cells 5, 11, 17, 23), and A
+  drops the lifted item at the cursor (`0x002EC438`: same cell back in place, another a swap, column 5 re-equips
+  X/Y/I/II). The D-pad was kept from the game only while A was held, so a direction still held at A's release moved
+  the cursor and the port's drop A put the item elsewhere; the put-back check read only `0x00506748`. Now
+  (`StepTopScreenDpadItemPicker`) each direction held while A takes items stays kept until it is released, and the
+  drop is sent only with the cursor on the item; otherwise the item stays lifted for the player's own A.
+- **Log:** the picker line gains `cursor=` and a line when the drop is sent or refused. New, at most 40 a session:
+  `dpad item: <dir> pressed slot=.. slot_item=0x.. age=.. item_age=.. ... : item=0x.. button=.. (the press scan
+  takes it|refused)` on each D-pad item press in gameplay (pause state 2), and `dpad item: button=.. press scan
+  resolved item=0x..` when the slot resolver answered. The last line before a freeze shows whether the game
+  reached the item.
+- **Test:** `oot3d_top_screen_mod_profile_tests` (TestPickerMatchesShortcuts, TestPickerHold, TestDispatch, TestPicker).
+  Console check: hold A on an item in column 0, press Left, release A before Left: the item stays in its cell and
+  X/Y/I/II are unchanged; then use it from the D-pad and read the `dpad item:` lines.
+
 ### Simple shadow flashing back to the foot spots (logs39 and three captures, 11/13)
 - **Seen:** "the shadow is pretty glitchy" (user, three clips at 21:27-21:28, Shadow method Texture;
   logs39 from 0.2.3 build 36). In the clips the dark area under Link loses about 1,800 pixels on one

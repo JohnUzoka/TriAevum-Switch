@@ -389,14 +389,16 @@ void TestPicker() {
           "no magic arrow, empty slot or position past the grid");
   picker.PageState = 8U;
   picker.Position = 1U;
+  picker.Cursor = 1U;
   const auto taken = DescribeTopScreenDpadItemPicker(picker, 1U, -1);
-  Require(taken.find("dpad picker: A held page_state=8 position=1 other_position=0 age=adult slot=1 item=0x") == 0U &&
+  Require(taken.find("dpad picker: A held page_state=8 position=1 other_position=0 cursor=1 "
+                     "age=adult slot=1 item=0x") == 0U &&
               taken.ends_with(": takes it"),
           "the picker log line names what it read and that it took the item");
   picker.Position = 2U;
   picker.Age = 1U;
   Require(DescribeTopScreenDpadItemPicker(picker, slot(2), 3).find(
-              "dpad picker: right page_state=8 position=2 other_position=0 age=child slot=15") == 0U &&
+              "dpad picker: right page_state=8 position=2 other_position=0 cursor=1 age=child slot=15") == 0U &&
               DescribeTopScreenDpadItemPicker(picker, slot(2), 3)
                   .ends_with("refused: the item is for the other age"),
           "the picker log line says why it refused the item");
@@ -422,6 +424,131 @@ void TestPicker() {
   const auto before = config;
   AssignTopScreenDpadItem(config, false, 1U, 4U);
   Require(config == before, "a magic arrow slot is never assigned");
+}
+
+// Issue #13 follow-up (0.2.4: "the game freezes when using those items",
+// Shortcuts works): the picker gives a direction exactly what Controls >
+// Shortcuts gives it, for every slot, direction and age.
+void TestPickerMatchesShortcuts() {
+  for (const bool child : {false, true}) {
+    for (std::size_t direction = 0; direction < 4U; ++direction) {
+      for (const auto slot : kTopScreenDpadItemSlots) {
+        TopScreenUiConfig picked;
+        AssignTopScreenDpadItem(picked, child, direction, slot);
+        // DrawTopScreenActionBindings: the action Item, then the item.
+        TopScreenUiConfig menu;
+        (child ? menu.ChildDpad : menu.AdultDpad)[direction] = TopScreenDpadAction::Item;
+        (child ? menu.ChildDpadItemSlots : menu.AdultDpadItemSlots)[direction] = slot;
+        Require(picked == menu && TopScreenDpadItemSlots(picked, child) ==
+                                      TopScreenDpadItemSlots(menu, child),
+                "the picker stores what Controls > Shortcuts stores");
+      }
+    }
+  }
+  // logs46: "left page_state=8 position=16 ... age=adult slot=1 item=0x01
+  // item_age=9: takes it". 0x00506C58[1] is 9 in the EUR code.bin: Deku Nuts
+  // for both ages, so the adult may take them; the D-pad then gives them.
+  TopScreenDpadItemPickerState picker;
+  picker.PickedUp = true;
+  picker.PageState = 8U;
+  picker.Age = 0U;
+  picker.ItemAge.fill(0U);
+  picker.ItemAge[kNut] = 9U;
+  picker.Inventory.fill(0xFFU);
+  picker.Inventory[1] = kNut;
+  picker.Grid.fill(0xFFU);
+  picker.Grid[16] = 1U;
+  picker.Position = 16U;
+  const auto slot = ResolveTopScreenDpadItemPickerSlot(picker);
+  Require(slot == 1U && slot == kTopScreenDpadItemSlots[1],
+          "position 16 of the adult grid is the Deku Nuts slot, Shortcuts' \"Deku Nuts\"");
+  TopScreenUiConfig config;
+  AssignTopScreenDpadItem(config, false, 2U, slot);
+  auto state = Field();
+  state.Age = 0U;
+  state.ItemAge[kNut] = 9U;
+  state.Inventory[1] = kNut;
+  state.Slots = TopScreenDpadItemSlots(config, false);
+  Require(ResolveTopScreenDpadItem(state, 2U) == kNut, "the adult's Left gives the Deku Nuts");
+  state.Age = 1U;
+  state.Slots = TopScreenDpadItemSlots(config, false);
+  Require(ResolveTopScreenDpadItem(state, 2U) == kNut, "item_age 9: the child's too");
+  const auto press = DescribeTopScreenDpadItemPress(state, 2U);
+  Require(press.find("dpad item: left pressed slot=1 slot_item=0x01 age=child item_age=9 ") == 0U &&
+              press.ends_with("item=0x01 button=8 (the press scan takes it)"),
+          "the D-pad press log line names the slot, the item and the button");
+  state.StateFlags1 = 0x00800000U; // on Epona
+  Require(DescribeTopScreenDpadItemPress(state, 2U).ends_with("item=0xFF button=0 (refused)"),
+          "and a refusal");
+  Require(DescribeTopScreenDpadItemResolve(8U, kNut, false) ==
+              "dpad item: button=8 press scan resolved item=0x01",
+          "the resolver log line");
+}
+
+// Issue #13 follow-up: after a direction took the item, A released before
+// the direction let the game see a fresh D-pad press in state 8; its cursor
+// moved (Left from column 0 wraps to column 5, the X/Y/I/II cells) and the
+// port's A then dropped the item there instead of back in place.
+void TestPickerHold() {
+  TopScreenDpadItemPickerState picker;
+  picker.PickedUp = true;
+  picker.PageState = 8U;
+  picker.Position = 0U; // column 0
+  picker.Cursor = 0U;
+  constexpr std::array<bool, 4> kNone{};
+  constexpr std::array<bool, 4> kLeft{false, false, true, false};
+  TopScreenDpadItemPickerHold hold;
+
+  auto step = StepTopScreenDpadItemPicker(hold, &picker, 0U, true, kLeft, kLeft);
+  Require(step.Take == kLeft && step.KeepFromGame == std::array<bool, 4>{true, true, true, true} &&
+              !step.Drop && hold.PutBack == 0U,
+          "A held: Left takes the item and the D-pad is kept from the game");
+  step = StepTopScreenDpadItemPicker(hold, &picker, 0U, false, kLeft, kNone);
+  Require(step.KeepFromGame == kLeft && !step.Drop && hold.ReleaseSeen,
+          "A released with Left still held: Left stays kept, the game takes the release");
+  step = StepTopScreenDpadItemPicker(hold, &picker, 0U, false, kLeft, kNone);
+  Require(step.Drop && !step.DropRefused && step.KeepFromGame == kLeft && !hold.PutBack,
+          "the drop goes with the cursor still on the item");
+  picker.PickedUp = false;
+  picker.PageState = 2U;
+  step = StepTopScreenDpadItemPicker(hold, nullptr, kTopScreenDpadItemSlotNone, false, kLeft,
+                                     kNone);
+  Require(step.KeepFromGame == kLeft, "Left stays kept from the browsing page until released");
+  step = StepTopScreenDpadItemPicker(hold, nullptr, kTopScreenDpadItemSlotNone, false, kNone,
+                                     kNone);
+  Require(step.KeepFromGame == kNone && hold.Kept == kNone, "released, the D-pad is the game's");
+  step = StepTopScreenDpadItemPicker(hold, nullptr, kTopScreenDpadItemSlotNone, false, kLeft,
+                                     kLeft);
+  Require(step.KeepFromGame == kNone, "a new press browses");
+
+  // The cursor left the item (the stick moves it too): no drop, the item
+  // stays lifted for the player's own A.
+  picker.PickedUp = true;
+  picker.PageState = 8U;
+  hold = {};
+  StepTopScreenDpadItemPicker(hold, &picker, 0U, true, kLeft, kLeft);
+  StepTopScreenDpadItemPicker(hold, &picker, 0U, false, kNone, kNone);
+  picker.Cursor = 5U; // Left from column 0: the X/Y/I/II column
+  step = StepTopScreenDpadItemPicker(hold, &picker, 0U, false, kNone, kNone);
+  Require(!step.Drop && step.DropRefused && !hold.PutBack,
+          "no drop onto the cell the cursor moved to");
+
+  // The game dropped or moved the item itself: nothing to send.
+  picker.Cursor = 0U;
+  hold = {};
+  StepTopScreenDpadItemPicker(hold, &picker, 0U, true, kLeft, kLeft);
+  picker.PickedUp = false;
+  step = StepTopScreenDpadItemPicker(hold, &picker, kTopScreenDpadItemSlotNone, false, kNone,
+                                     kNone);
+  Require(!step.Drop && !step.DropRefused && !hold.PutBack, "the page left state 8: no drop");
+
+  // No item to take: the D-pad is the game's, as before.
+  hold = {};
+  picker.PickedUp = true;
+  step = StepTopScreenDpadItemPicker(hold, &picker, kTopScreenDpadItemSlotNone, true, kLeft,
+                                     kLeft);
+  Require(step.Take == kNone && step.KeepFromGame == kNone && !hold.PutBack,
+          "a refused item leaves the D-pad to the game");
 }
 
 constexpr std::uint32_t kPlay = 0x30000000U;
@@ -483,6 +610,9 @@ void TestDispatch() {
               state.r[0] == kNut && state.r[15] == kTopScreenDpadItemPressResolverReturn &&
               runtime.PendingDpadItemButton == 0U,
           "button 8 resolves to its Deku Nuts");
+  Require(runtime.DpadItemPressResolves == 1U && runtime.LastDpadItemButton == 8U &&
+              runtime.LastDpadItem == kNut,
+          "the press resolve is recorded for the game log");
 
   state.r[0] = 0x20U;
   Require(ExecuteTopScreenItemDispatch(kTopScreenDpadItemHeldPutAway, memory, state,
@@ -553,5 +683,7 @@ void RunTopScreenDpadItemsTests() {
   TestBoomerangSlingshot();
   TestPresentation();
   TestPicker();
+  TestPickerMatchesShortcuts();
+  TestPickerHold();
   TestDispatch();
 }

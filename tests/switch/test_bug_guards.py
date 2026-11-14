@@ -124,11 +124,40 @@ GUARDS = [
           "oot3d_top_screen_mod_profile_tests (ignore-camera floors)"),
     Guard("issue #13 (logs41): hold A did nothing because the A press picks the item up (Items page state 8, "
           "0x00506748 its position) and the D-pad then moved it: the picker takes the picked item while A is held, "
-          "keeps the direction from the game and puts the item back after the release",
+          "keeps the direction from the game and puts the item back after the release; issue #13 follow-up (0.2.4): "
+          "a direction still held when A was released moved the cursor and the drop put the item elsewhere, so "
+          "held directions stay kept until released",
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
-          r'if \(pickerRead && pickerPutBack && !aHeld\) \{.*?inputFrame\.Hid\.Buttons \|= aMask;.*?'
-          r'if \(pickerRead && aHeld\) \{.*?inputFrame\.Hid\.Buttons &= ~mask;.*?pickerPutBack = picker\.Position;',
-          "oot3d_top_screen_mod_profile_tests (TestPicker)"),
+          r'const auto pickerStep = Oot3dNativeGame::StepTopScreenDpadItemPicker\(\s*pickerHold, pickerRead \? &picker : nullptr, slot, aHeld, directionsHeld,\s*directionsPressed\);.*?'
+          r'if \(pickerStep\.KeepFromGame\[direction\]\)\s*inputFrame\.Hid\.Buttons &= ~button\(kPickerDirections\[direction\]\);.*?'
+          r'if \(pickerStep\.Drop\) inputFrame\.Hid\.Buttons \|= aMask;',
+          "oot3d_top_screen_mod_profile_tests (TestPickerHold)",
+          forbid=r'pickerPutBack|pickerReleaseSeen'),
+    Guard("issue #13 follow-up (0.2.4, 'the game freezes when using those items'): the port's drop A lands under "
+          "the game's Items cursor (0x002EC438), which a direction released after A had moved (Left from column 0 "
+          "wraps to the X/Y/I/II column): directions stay kept until released and the drop goes only with the "
+          "cursor still on the picked item",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.cpp",
+          r'hold\.Kept\[direction\] = hold\.Kept\[direction\] && held\[direction\];\s*step\.KeepFromGame\[direction\] = hold\.Kept\[direction\];.*?'
+          r'step\.Drop = picker->Cursor == picker->Position;.*?'
+          r'step\.KeepFromGame\[direction\] = true;\s*hold\.Kept\[direction\] = held\[direction\];',
+          "oot3d_top_screen_mod_profile_tests (TestPickerHold)"),
+    Guard("issue #13 follow-up: the picker reads the game's Items cursor (0x00506770 column, 0x00506774 row)",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.cpp",
+          r'!memory\.Read32\(0x00506770U, &column\) \|\| !memory\.Read32\(0x00506774U, &row\).*?result\.Cursor = row \* 6U \+ column;',
+          "oot3d_top_screen_mod_profile_tests (TestPickerHold)"),
+    Guard("issue #13 follow-up: a freeze on a D-pad item use left no log of the path: each D-pad item press in "
+          "gameplay and each item the slot resolver gives a press scan write a game log line",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_frame.cpp",
+          r'if \(!topScreenDpadItemHeld\[direction\] \|\| !directionsPressed\[direction\]\) continue;.*?'
+          r'DescribeTopScreenDpadItemPress\(dpadState, direction\).*?'
+          r'if \(dpadItemDispatch\.DpadItemPressResolves != loggedDpadItemResolves\) \{.*?DescribeTopScreenDpadItemResolve\(',
+          "oot3d_top_screen_mod_profile_tests (TestPickerMatchesShortcuts)"),
+    Guard("issue #13 follow-up: the resolver records the item it gave a press scan's D-pad button for the log",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_item_dispatch.cpp",
+          r'if \(state\.r\[14\] == kTopScreenDpadItemPressResolverReturn\) \{\s*\+\+runtime\.DpadItemPressResolves;\s*'
+          r'runtime\.LastDpadItemButton = button;\s*runtime\.LastDpadItem = static_cast<uint8_t>\(state\.r\[0\]\);',
+          "oot3d_top_screen_mod_profile_tests (TestDispatch)"),
     Guard("issue #13: the picker resolves only the item A picked up (state 8), not a browsing page whose "
           "positions are -1",
           "tools/oot3d/ui_topscreen/oot3d_top_screen_dpad_items.cpp",

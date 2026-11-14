@@ -221,6 +221,11 @@ bool ExecuteTopScreenItemDispatch(
             ? ResolveTopScreenDpadItem(dpad, button - kTopScreenDpadItemButtonFirst)
             : kTopScreenNoItem;
         ++runtime.DpadItemResolves;
+        if (state.r[14] == kTopScreenDpadItemPressResolverReturn) {
+            ++runtime.DpadItemPressResolves;
+            runtime.LastDpadItemButton = button;
+            runtime.LastDpadItem = static_cast<uint8_t>(state.r[0]);
+        }
         state.r[15] = state.r[14];
         return true;
     }

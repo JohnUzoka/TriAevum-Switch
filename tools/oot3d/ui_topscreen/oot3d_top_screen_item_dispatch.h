@@ -32,6 +32,12 @@ struct TopScreenItemDispatchRuntime {
     uint32_t PendingDpadItemButton = 0;
     uint64_t DpadItemButtons = 0;
     uint64_t DpadItemResolves = 0;
+    // The last item the slot resolver gave a press scan's D-pad button, for
+    // the game log (issue #13: a freeze on use): the frame writes a line
+    // each time DpadItemPressResolves moves.
+    uint64_t DpadItemPressResolves = 0;
+    uint32_t LastDpadItemButton = 0;
+    uint8_t LastDpadItem = 0xFFU;
     uint64_t DpadItemsKept = 0;
     uint64_t DpadBottleUpdates = 0;
     uint32_t PendingSelection = 0;

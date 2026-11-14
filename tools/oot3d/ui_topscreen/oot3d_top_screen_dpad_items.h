@@ -117,6 +117,13 @@ inline constexpr std::uint32_t kTopScreenTouchOcarinaDisabled = 0x08000000U;
 void SettleTopScreenDpadItemHudState(TopScreenDpadItemGuestState &state,
                                      std::uint32_t touchFlags) noexcept;
 
+// The guest state on the root PlayState (0x005043D4 + 0x0C), as the HUD and
+// the D-pad press log read it.
+bool ReadTopScreenDpadItemRootState(NativeA32Memory &memory,
+                                    const std::array<std::uint8_t, 4> &childSlots,
+                                    const std::array<std::uint8_t, 4> &adultSlots,
+                                    TopScreenDpadItemGuestState *state);
+
 // Per direction: its D-pad item button resolves an item now (the gameplay
 // rules, on the root PlayState, with the settled statuses above). For the
 // HUD, which greys the others. The hooks keep the live statuses, as 3.2.2
@@ -142,6 +149,11 @@ struct TopScreenDpadItemPickerState {
   // writes it): logged beside Position (issue #13) to tell which one follows
   // the cursor on the console.
   std::uint32_t OtherPosition = 0U;
+  // The game's Items cursor, row * 6 + column (0x00506774 row, 0x00506770
+  // column). In state 8 the D-pad moves it (0x002ED11C..: Left from column 0
+  // wraps to column 5, the X/Y/I/II cells 5, 11, 17, 23) and A drops the
+  // picked item there (0x002EC438): back in place only where it was taken.
+  std::uint32_t Cursor = 0U;
   std::uint32_t Age = 0U;         // 0 adult, 1 child
   // The grid of the current age: position -> slot (SaveContext +0x138A for
   // the child, +0x13A2 for the adult, as PauseItemsPage_CanSwapSelectedSlots).
@@ -164,6 +176,36 @@ ResolveTopScreenDpadItemPickerSlot(const TopScreenDpadItemPickerState &state) no
 std::string DescribeTopScreenDpadItemPicker(const TopScreenDpadItemPickerState &state,
                                             std::uint8_t slot, int direction);
 
+// The picker's hold on the D-pad after a direction took the item. Issue #13
+// follow-up (0.2.4, "the game freezes when using those items"): once A was
+// released the D-pad reached the game again before the port's drop, so a
+// direction still held (or pressed) moved the cursor and the drop put the
+// item elsewhere: swapped with a neighbour, or into the X/Y/I/II column,
+// which re-equips the game's own buttons. Now every direction held while A
+// takes items stays kept from the game until it is released, and the drop
+// is sent only while the cursor is still on the picked item.
+struct TopScreenDpadItemPickerHold {
+  std::optional<std::uint32_t> PutBack; // the picked item's position, to drop
+  bool ReleaseSeen = false;             // the game took A's release
+  std::array<bool, 4> Kept{};           // directions kept until released
+};
+
+struct TopScreenDpadItemPickerStep {
+  std::array<bool, 4> Take{};         // directions that take the item now
+  std::array<bool, 4> KeepFromGame{}; // directions cleared from the game
+  bool Drop = false;                  // send the port's A that drops the item
+  bool DropRefused = false;           // the cursor left the item: no drop
+};
+
+// One refresh of the picker. `picker` is null when it was not read (no
+// config runtime, or neither A held nor a drop pending); `slot` is
+// ResolveTopScreenDpadItemPickerSlot of it. `held` / `pressed`: Up, Down,
+// Left, Right.
+TopScreenDpadItemPickerStep StepTopScreenDpadItemPicker(
+    TopScreenDpadItemPickerHold &hold, const TopScreenDpadItemPickerState *picker,
+    std::uint8_t slot, bool aHeld, const std::array<bool, 4> &held,
+    const std::array<bool, 4> &pressed) noexcept;
+
 // 3.2.2 0x005CAEC4: the scene, the water and the minigame refuse the item.
 bool TopScreenDpadItemRestricted(const TopScreenDpadItemGuestState &state,
                                  std::uint8_t item) noexcept;
@@ -172,6 +214,16 @@ bool TopScreenDpadItemRestricted(const TopScreenDpadItemGuestState &state,
 // kTopScreenNoItem.
 std::uint8_t ResolveTopScreenDpadItem(const TopScreenDpadItemGuestState &state,
                                       std::size_t direction) noexcept;
+
+// The game log line for a D-pad item press in gameplay (issue #13: a freeze
+// on use, no log of the path): the direction's slot and item, the age, what
+// the rules read and the item they give, or kTopScreenNoItem. Paired with
+// DescribeTopScreenDpadItemResolve, written when the slot resolver answered,
+// the last line before a freeze tells whether the game reached the item.
+std::string DescribeTopScreenDpadItemPress(const TopScreenDpadItemGuestState &state,
+                                           std::size_t direction);
+std::string DescribeTopScreenDpadItemResolve(std::uint32_t button, std::uint8_t item,
+                                             bool holdScan);
 
 // 3.2.2 0x005D2050 at a scan exit: 6 + direction, or 0 to keep the native
 // "no button". The press scan takes fresh presses and stays out of the
