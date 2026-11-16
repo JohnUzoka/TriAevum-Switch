@@ -1333,6 +1333,19 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   hand (Put Away), aim the slingshot, Z-target: the D-pad items stay grey with the game's Y/X/I/II, without
   blinking, and are usable again when the item is put away.
 
+### Lens of Truth slowdown: missing shaders (issue #15, 0.2.6, 11/16)
+- **Report:** Lens of Truth drops to 15-20 FPS even at high clocks. The attached `logs.zip` is kept at
+  `workshop-OOT/logs/issue15-lens/`. The player updated to build 55 and loaded the 2234-stage pack.
+- **Evidence:** Hyrule Field slow windows show 23-29 FPS, GPU 32-43 ms even at CPU 1785 / GPU 614;
+  `deko3d.txt` records the fallback shader and ends with missing fragment `17cde0467b02f7ca`.
+  The archive contains 16 fragment texts, nine absent from 0.2.6's pack (seven are already covered).
+- **Fix:** retain those nine sources in `$OOT3D_WORK/shaders/console-missing/`; the existing release pipeline
+  compiles them and their supported lighting variants into both packs. No renderer or gameplay changes.
+- **Verification:** all 16 source hashes match their recorded keys; offline compilation with lighting variants
+  produces 62 stages, zero failures and zero scratch, including 37 stages not in 0.2.6. Fragment
+  `17cde0467b02f7ca` compiles to 9728 B. The built release must cover every uploaded key and retain every
+  prior pack entry. Console performance with the Lens remains for the reporter to confirm.
+
 ### Ice Cavern and Zora's River slowdowns: 21 missing shaders (user, logs45, 0.2.4, 11/13)
 - **Seen:** "more drops in the ice cavern", "a drop at the waterfall". Ice Cavern rooms 1 and 9: 8-15 FPS
   with `gpu_ms` 65-116 at CPU 1224 / GPU 461; `programs (frame)` there: 58-77 parametric (uber) draws a frame
