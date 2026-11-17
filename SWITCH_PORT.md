@@ -1333,6 +1333,33 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   hand (Put Away), aim the slingshot, Z-target: the D-pad items stay grey with the game's Y/X/I/II, without
   blinking, and are usable again when the item is put away.
 
+### New issue triage: shader coverage, boots diagnostics and startup failures (issues #16-19, 11/17)
+- **Shaders (#18/#19):** the Barinade/Royal Family Tomb upload contains 24 fragment texts absent from 0.2.7;
+  the Fire Temple/Zelda upload contains 138 texts, 85 absent. Four overlap: 105 unique new source texts, retained
+  in `$OOT3D_WORK/shaders/console-missing/`. Their recorded keys match the source hashes. Compilation with
+  the existing lighting-variant tool yields 525 new stages, no failures or scratch use. The resulting pack
+  should retain all 2271 prior keys and cover every file in both uploads. Frame-rate recovery needs a console
+  retest; the performance logs span old sessions, including a 30 FPS configuration in #18.
+- **Zelda cutscene (#19):** the final uploaded attempt still ends with `native PICA copy retention failed:
+  rendering backend does not pin native PICA texture copies`. Its backend identifies a Nov-9 build, before
+  the existing `e1198bac` fix. Current copy-retention/submission host checks pass; no exception suppression or
+  speculative renderer change. Request a current-release retry, fresh logs and the pre-scene save if it fails.
+- **HUD/startup (#17):** crash build ID matches released 0.2.6. Symbolication, after verifying the relevant
+  instruction ranges against the retained ELF, identifies a failed 32 MiB shader-code backing allocation in
+  `ShaderStore::Init`, deko3d result 0x767 (module 359, OutOfMemory). Process is Album-applet hbloader. Ask for
+  an R-held installed-game/title-override launch, not another reinstall or deleting saves. The photograph is a
+  different HOME Menu failure (2144-0001); request its matching report. Actual HUD Build/Install/reinstall smoke
+  with official 3.2.2 inputs passed on host for EUR and USA; this does not reproduce the Switch memory limit.
+- **Iron Boots (#16), diagnostic test only:** native boots dispatch precedes ordinary item-action equality
+  checks, while the D-pad shares equipment eligibility gates. SSE has distinct equip/removal restrictions;
+  without the failing state, bypassing them would be speculative. Keep gameplay unchanged. Log up to 40
+  `dpad boots:` attempts per process before consumption: real eligibility/planner result, equipment, held actor,
+  item actions, pause/age/health, water/player flags and native-button restrictions. No extra reads after the cap
+  or logs on unrelated actions. Host fixtures exercise underwater attempts and actual rejection without writes.
+  Ask for one failed D-pad press immediately followed by successful native-button use in the same room/run,
+  whether equipping/removing, and the full log/clip. Whirlpool shaders need a same-run log; no coverage claim
+  for unvisited/unrecorded effects. Release as a test while the boots report remains unconfirmed.
+
 ### Lens of Truth slowdown: missing shaders (issue #15, 0.2.6, 11/16)
 - **Report:** Lens of Truth drops to 15-20 FPS even at high clocks. The attached `logs.zip` is kept at
   `workshop-OOT/logs/issue15-lens/`. The player updated to build 55 and loaded the 2234-stage pack.

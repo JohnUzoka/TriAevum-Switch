@@ -3184,6 +3184,16 @@ bool NativeA32WindowSession::UpdateGuestServicesForRefresh(
       consumedDpadActions.Pressed[static_cast<std::size_t>(action)] = false;
       consumedDpadActions.Held[static_cast<std::size_t>(action)] = false;
     }
+    static unsigned bootsAttemptLogLines = 0U;
+    if (bootsAttemptLogLines < 40U &&
+        Oot3dNativeGame::HasTopScreenEquipmentActionInput(consumedDpadActions)) {
+      const auto diagnostic = Oot3dNativeGame::DescribeTopScreenBootsActionAttempt(
+          process.Memory(), consumedDpadActions);
+      if (!diagnostic.empty()) {
+        Oot3dNativeGame::WriteGameLog(diagnostic);
+        ++bootsAttemptLogLines;
+      }
+    }
     if (!Oot3dNativeGame::ConsumeTopScreenGameplayActions(
             process, consumedDpadActions,
             nativeCandidateDispatch.TopScreenInput.ZrPressed ||

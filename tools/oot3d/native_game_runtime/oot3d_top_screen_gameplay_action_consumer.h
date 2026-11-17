@@ -33,6 +33,11 @@ bool ReadTopScreenChildLink(const NativeA32Memory &memory, bool *childLink,
 bool PlayTopScreenUiSound(NativeA32Process &process, std::uint32_t sound,
                          std::uint32_t returnAddress, std::string *error);
 
+// Read-only evidence for a boots shortcut press; empty for other actions.
+// The caller bounds logging. This does not relax gameplay equipment gates.
+std::string DescribeTopScreenBootsActionAttempt(
+    NativeA32Memory &memory, const TopScreenDpadActionState &actions);
+
 // Application-side sink for TopScreen gameplay intents. It is the only new
 // 2.1.1 layer that may invoke original guest actions; the UI planner and the
 // renderer remain independent of guest addresses and A32 execution.

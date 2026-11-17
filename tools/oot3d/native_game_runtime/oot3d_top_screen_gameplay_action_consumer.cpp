@@ -2,10 +2,12 @@
 
 #include "oot3d_native_a32_process.h"
 #include "oot3d_top_screen_gameplay_actions.h"
+#include "oot3d_top_screen_dpad_items.h"
 
 #include "oot3d_ui/ui_native_actions.h"
 
 #include <array>
+#include <cstdio>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -215,6 +217,73 @@ bool ReadTopScreenChildLink(const NativeA32Memory &memory, bool *childLink,
   }
   *childLink = age != 0U;
   return true;
+}
+
+std::string DescribeTopScreenBootsActionAttempt(
+    NativeA32Memory &memory, const TopScreenDpadActionState &actions) {
+  const bool iron = actions.WasPressed(TopScreenDpadAction::IronBoots);
+  const bool hover = actions.WasPressed(TopScreenDpadAction::HoverBoots);
+  const bool cycle = actions.WasPressed(TopScreenDpadAction::AllBootsToggle);
+  if (!iron && !hover && !cycle) {
+    return {};
+  }
+  NativeGameplayActionSnapshot snapshot;
+  std::string error;
+  if (!ReadActionState(memory, &snapshot, &error)) {
+    return "dpad boots: snapshot unavailable: " + error;
+  }
+  const auto plan = ResolveTopScreenEquipmentAction(actions, snapshot.Equipment);
+  std::uint32_t age = 0U, pause = 0U, heldActor = 0U, flags1 = 0U, flags2 = 0U;
+  std::uint32_t touch = 0U;
+  std::uint16_t health = 0U, waterDepth = 0U, bg = 0U;
+  std::uint8_t type = 0U, subtype = 0U, cutscene = 0U, held = 0U, item = 0U;
+  std::uint8_t boots = 0U;
+  std::array<std::uint8_t, 4> buttons{}, statuses{};
+  bool complete = memory.Read32(kSaveContext + 4U, &age);
+  complete &= memory.Read32(kPauseState, &pause);
+  complete &= memory.Read16(kSaveContext + 0x44U, &health);
+  complete &= memory.Read32(kTopScreenTouchFlags, &touch);
+  for (std::size_t button = 0U; button < buttons.size(); ++button) {
+    complete &= memory.Read8(kSaveContext + 0x81U + button, &buttons[button]);
+    complete &= memory.Read8(0x00588EC8U + button, &statuses[button]);
+  }
+  if (snapshot.PlayState != 0U) {
+    complete &= memory.Read8(snapshot.PlayState + 0x100U, &type);
+    complete &= memory.Read8(snapshot.PlayState + 0x101U, &subtype);
+  }
+  if (snapshot.Player != 0U) {
+    complete &= memory.Read32(snapshot.Player + 0x1224U, &heldActor);
+    complete &= memory.Read8(snapshot.Player + 0x12BCU, &cutscene);
+    complete &= memory.Read8(snapshot.Player + 0x1A9U, &held);
+    complete &= memory.Read8(snapshot.Player + 0x1ACU, &item);
+    complete &= memory.Read8(snapshot.Player + 0x1A7U, &boots);
+    complete &= memory.Read16(snapshot.Player + 0x2224U, &waterDepth);
+    complete &= memory.Read16(snapshot.Player + 0x90U, &bg);
+    complete &= memory.Read32(snapshot.Player + 0x1710U, &flags1);
+    complete &= memory.Read32(snapshot.Player + 0x1714U, &flags2);
+  }
+  char line[768];
+  std::snprintf(
+      line, sizeof(line),
+      "dpad boots: pressed=%d%d%d eligible=%d change=%d/%d owned=0x%04X "
+      "equipped=0x%04X age=%u health=%u pause=%u play=0x%08X type=%u/%u "
+      "player=0x%08X held_actor=0x%08X cs=%u held_action=%u item_action=%u "
+      "water_depth=%u boots=%u bg=0x%04X flags1=0x%08X flags2=0x%08X "
+      "buttons=%02X%02X%02X%02X statuses=%02X%02X%02X%02X touch=0x%08X read=%s",
+      iron ? 1 : 0, hover ? 1 : 0, cycle ? 1 : 0,
+      snapshot.Equipment.Eligible ? 1 : 0,
+      plan.ChangeEquipment ? static_cast<int>(plan.ChangeEquipment->equipment_type) : -1,
+      plan.ChangeEquipment ? plan.ChangeEquipment->value : -1,
+      snapshot.Equipment.OwnedEquipment, snapshot.Equipment.EquippedEquipment,
+      static_cast<unsigned>(age), health, static_cast<unsigned>(pause),
+      static_cast<unsigned>(snapshot.PlayState), type, subtype,
+      static_cast<unsigned>(snapshot.Player), static_cast<unsigned>(heldActor),
+      cutscene, held, item, waterDepth, boots, bg,
+      static_cast<unsigned>(flags1), static_cast<unsigned>(flags2),
+      buttons[0], buttons[1], buttons[2], buttons[3], statuses[0], statuses[1],
+      statuses[2], statuses[3], static_cast<unsigned>(touch),
+      complete ? "complete" : "partial");
+  return line;
 }
 
 bool ConsumeTopScreenGameplayActions(

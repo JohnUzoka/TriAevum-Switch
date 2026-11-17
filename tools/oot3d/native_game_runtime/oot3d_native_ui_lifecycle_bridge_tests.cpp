@@ -1,4 +1,5 @@
 #include "oot3d_native_ui_lifecycle_bridge.h"
+#include "oot3d_native_a32_process.h"
 #include "oot3d_top_screen_gameplay_action_consumer.h"
 #include "oot3d_top_screen_items_hint_consumer.h"
 #include "oot3d_top_screen_mod_profile.h"
@@ -26,10 +27,115 @@ void Require(bool condition, std::string_view message) {
   }
 }
 
+class BootsDiagnosticHostServices final
+    : public Oot3dNativeGame::NativeA32HostServices {
+public:
+  Oot3dNativeGame::NativeA32HostResult HandleSvc(
+      std::uint32_t, oot3d::recomp::a32::GuestState &,
+      Oot3dNativeGame::NativeA32Memory &,
+      Oot3dNativeGame::NativeA32HostContext &) override {
+    Fail("a refused boots attempt invoked guest code");
+  }
+};
+
+void TestBootsActionDiagnostics() {
+  using namespace Oot3dNativeGame;
+  const oot3d::recomp::a32::Registry registry{};
+  BootsDiagnosticHostServices services;
+  NativeA32Process process(registry, services);
+  auto &memory = process.Memory();
+  std::string error;
+  constexpr std::uint32_t kPlay = 0x005C0000U;
+  constexpr std::uint32_t kPlayer = 0x005E0000U;
+  Require(memory.MapRegion({"boots-diagnostic", 0x004D0000U, 0x00130000U,
+                            true, false, {}}, &error) &&
+              memory.Write32(0x005043E0U, kPlay) &&
+              memory.Write32(0x0050AF68U, 2U) &&
+              memory.Write16(0x0058799CU, 0xA0U) &&
+              memory.Write16(0x00587A0EU, 0x7000U) &&
+              memory.Write16(0x005879E2U, 0x2122U) &&
+              memory.Write8(kPlay + 0x100U, 3U) &&
+              memory.Write8(kPlay + 0x101U, 2U) &&
+              memory.Write32(kPlay + 0x20ACU, kPlayer) &&
+              memory.Write8(kPlayer + 0x1A7U, 1U) &&
+              memory.Write16(kPlayer + 0x2224U, 600U) &&
+              memory.Write16(kPlayer + 0x90U, 1U) &&
+              memory.Write8(0x005879D9U, 0x45U) &&
+              memory.Write8(0x00588EC8U, 0xFFU) &&
+              memory.Write32(0x0050AF9CU, 0x00800000U),
+          "cannot seed underwater boots diagnostic state");
+  TopScreenDpadActionState actions;
+  TopScreenGameplayActionConsumerRuntime runtime;
+  TopScreenGameplayActionConsumerStats stats;
+  const auto press = [&](TopScreenDpadAction action) {
+    actions = {};
+    actions.Pressed[static_cast<std::size_t>(action)] = true;
+  };
+  const auto contains = [](const std::string &line, std::string_view text) {
+    return line.find(text) != std::string::npos;
+  };
+  for (const auto action : {TopScreenDpadAction::IronBoots,
+                            TopScreenDpadAction::HoverBoots,
+                            TopScreenDpadAction::AllBootsToggle}) {
+    press(action);
+    const auto line = DescribeTopScreenBootsActionAttempt(memory, actions);
+    Require(contains(line, action == TopScreenDpadAction::IronBoots
+                               ? "eligible=1 change=3/1"
+                               : "eligible=1 change=3/3") &&
+                contains(line, "water_depth=600 boots=1 bg=0x0001") &&
+                contains(line, "buttons=45000000 statuses=FF000000") &&
+                contains(line, "touch=0x00800000 read=complete"),
+            "boots diagnostics lost the actual planner or underwater HUD state");
+  }
+  press(TopScreenDpadAction::IronBoots);
+  Require(memory.Write8(kPlayer + 0x1A9U, 17U) &&
+              memory.Write8(kPlayer + 0x1ACU, 0xFFU),
+          "cannot seed an item-action mismatch");
+  auto line = DescribeTopScreenBootsActionAttempt(memory, actions);
+  Require(contains(line, "eligible=0 change=-1/-1") &&
+              contains(line, "held_action=17 item_action=255") &&
+              ConsumeTopScreenGameplayActions(process, actions, false, 0U,
+                                              &runtime, &stats, &error) &&
+              stats.Attempts == 1U && stats.EquipmentChanges == 0U,
+          "diagnosing boots changed the existing item-action restriction");
+  Require(memory.Write8(kPlayer + 0x1ACU, 17U) &&
+              memory.Write32(kPlayer + 0x1224U, 0x005E8000U),
+          "cannot seed a held actor");
+  line = DescribeTopScreenBootsActionAttempt(memory, actions);
+  Require(contains(line, "eligible=0 change=-1/-1") &&
+              contains(line, "held_actor=0x005E8000") &&
+              ConsumeTopScreenGameplayActions(process, actions, false, 0U,
+                                              &runtime, &stats, &error) &&
+              stats.Attempts == 2U && stats.EquipmentChanges == 0U,
+          "diagnosing boots changed the existing held-actor restriction");
+  Require(memory.Write32(kPlayer + 0x1224U, 0U) &&
+              memory.Write8(kPlayer + 0x12BCU, 1U),
+          "cannot seed a cutscene action");
+  line = DescribeTopScreenBootsActionAttempt(memory, actions);
+  Require(contains(line, "eligible=0 change=-1/-1") && contains(line, "cs=1"),
+          "boots diagnostics lost the cutscene rejection gate");
+  std::uint16_t equipped = 0U;
+  Require(memory.Read16(0x005879E2U, &equipped) && equipped == 0x2122U,
+          "boots diagnostics mutated equipped equipment");
+  actions = {};
+  actions.Held[static_cast<std::size_t>(TopScreenDpadAction::IronBoots)] = true;
+  Require(DescribeTopScreenBootsActionAttempt(memory, actions).empty(),
+          "holding boots emitted repeated press diagnostics");
+  press(TopScreenDpadAction::SwordToggle);
+  Require(DescribeTopScreenBootsActionAttempt(memory, actions).empty(),
+          "a non-boots action emitted boots diagnostics");
+  NativeA32Memory missing;
+  press(TopScreenDpadAction::IronBoots);
+  Require(contains(DescribeTopScreenBootsActionAttempt(missing, actions),
+                   "snapshot unavailable:"),
+          "a missing boots snapshot appeared complete");
+}
+
 } // namespace
 
 int main() {
   using namespace Oot3dNativeGame;
+  TestBootsActionDiagnostics();
 
   NativeA32Memory memory;
   std::string error;
