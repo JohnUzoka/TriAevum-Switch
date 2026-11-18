@@ -205,6 +205,7 @@ int main() {
               parsedConfig.HudMarginY == -2 && parsedConfig.MagicBarY == 7U &&
               !parsedConfig.MinimapVisible &&
               parsedConfig.CameraZoomPercent == 130U &&
+              parsedConfig.FreeCameraZoomPercent == 130U &&
               parsedConfig.CameraFovPercent == 115U &&
               parsedConfig.SelectAction ==
                   TopScreenSelectAction::MinimapToggle &&
@@ -408,6 +409,7 @@ int main() {
   persistedConfig.HudScale = 1.20F;
   persistedConfig.MinimapVisible = false;
   persistedConfig.CameraZoomPercent = 130U;
+  persistedConfig.FreeCameraZoomPercent = 85U;
   persistedConfig.CameraFovPercent = 115U;
   persistedConfig.FreeCameraEnabled = true;
   persistedConfig.FreeCameraSpeedLevel = 6U;
@@ -423,6 +425,8 @@ int main() {
   Require(reloadedConfigSnapshot.Revision ==
                   initialConfigSnapshot.Revision + 1U &&
               reloadedConfigSnapshot.Config.HudScale == 1.20F &&
+              reloadedConfigSnapshot.Config.CameraZoomPercent == 130U &&
+              reloadedConfigSnapshot.Config.FreeCameraZoomPercent == 85U &&
               !reloadedConfigSnapshot.Config.MinimapVisible &&
               reloadedConfigSnapshot.Config.FreeCameraEnabled &&
               reloadedConfigSnapshot.Config.FreeCameraSpeedLevel == 6U,
@@ -3894,11 +3898,42 @@ int main() {
               std::abs(orbit.IntendedEye.Z + 145.0F) < 0.1F,
           "TopScreen free-camera orbit contract is incorrect");
   cameraState.Distance = 150.0F;
-  cameraState.ZoomPercent = 130U;
+  cameraState.FreeZoomPercent = 130U;
   const auto zoomedOrbit = BuildTopScreenFreeCameraOrbit(
       cameraState, {{10.0F, 20.0F, 30.0F}, {}, {}, false, false, false, 0, 0});
   Require(std::abs(zoomedOrbit.IntendedEye.Z + 175.0F) < 0.1F,
-          "TopScreen camera zoom did not compose with free-camera orbit");
+          "TopScreen free-camera zoom did not change the orbit distance");
+  // Regular-camera distance must not leak into the independently set orbit.
+  const auto orbitAt = [](std::uint8_t regular, std::uint8_t free) {
+    TopScreenUiConfig config;
+    config.CameraZoomPercent = regular;
+    config.FreeCameraZoomPercent = free;
+    config.FreeCameraEnabled = true;
+    TopScreenFreeCameraState state;
+    ApplyTopScreenFreeCameraConfig(state, config);
+    state.Active = true;
+    state.Smoothing = false;
+    const auto scalar = ResolveTopScreenCameraNormal1Scalar(
+        std::bit_cast<std::uint32_t>(60.0F), state.ZoomPercent);
+    const auto orbit = BuildTopScreenFreeCameraOrbit(
+        state, {{10.0F, 20.0F, 30.0F}, {}, {}, false, false, false, 0, 0});
+    return std::pair{orbit.IntendedEye.Z, scalar.ContinuedValueBits};
+  };
+  const auto independent = orbitAt(130U, 85U);
+  Require(independent.first == orbitAt(100U, 85U).first &&
+              independent.second == orbitAt(130U, 170U).second &&
+              independent.first != orbitAt(130U, 170U).first,
+          "regular and free camera zoom must affect only their own distances");
+  TopScreenUiConfig independentConfig;
+  Require(ParseTopScreenUiConfigText(
+              R"({"schema":"oot3d_topscreen_ui_v2","camera_zoom_percent":130,"free_camera_zoom_percent":85})",
+              &independentConfig, &configError) &&
+              independentConfig.CameraZoomPercent == 130U && independentConfig.FreeCameraZoomPercent == 85U,
+          "independent camera distances must survive configuration loading");
+  Require(!ParseTopScreenUiConfigText(
+              R"({"schema":"oot3d_topscreen_ui_v2","free_camera_zoom_percent":86})",
+              &independentConfig, &configError),
+          "free camera distance keeps the supported five-percent step");
 
   NativeA32Memory cameraMemory;
   Require(cameraMemory.MapRegion({"topscreen-camera-globals",

@@ -112,6 +112,7 @@ struct TopScreenUiConfig {
   TopScreenSelectAction SelectAction = TopScreenSelectAction::SaveScreen;
   bool ExitItemsToSaveScreen = true;
   std::uint8_t CameraZoomPercent = 100U;
+  std::uint8_t FreeCameraZoomPercent = 100U;
   std::uint8_t CameraFovPercent = 100U;
   std::array<TopScreenDpadAction, 4> ChildDpad =
       kTopScreenChildDpadDefaults;

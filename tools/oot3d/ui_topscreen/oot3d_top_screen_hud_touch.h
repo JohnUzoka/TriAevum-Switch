@@ -169,9 +169,9 @@ struct TopScreenTouchPollResult {
   float MenuY = 0.0F;
 };
 
-// A HUD press lasts at least this many consuming polls (guest refreshes):
-// the game reads some buttons at 30 Hz.
-inline constexpr std::uint8_t kTopScreenHudMinimumPressPolls = 2;
+// A guest-owned page or HUD press lasts at least this many consuming polls
+// (60 Hz guest refreshes), so the game's 30 Hz update sees even a quick tap.
+inline constexpr std::uint8_t kTopScreenGuestMinimumPressPolls = 2;
 
 // Gives new fingers their owner, reports what the fingers hold this poll and,
 // on a poll a guest refresh consumes, retires presses already delivered.

@@ -1,6 +1,8 @@
 #include "oot3d_native_ui_texture_provider.h"
 #include "oot3d_native_a32_memory.h"
+#include "fast/oot3d/message_button_glyphs.h"
 
+#include <array>
 #include <algorithm>
 #include <cstdlib>
 #include <cstdint>
@@ -365,8 +367,8 @@ int main() {
         [&] { return packRevision; },
     };
     profileTextureProvider.SetCustomTextureSource(packSource);
-    Require(profileTextureProvider.Revision() == 7U,
-            "UI provider does not report its custom texture revision");
+    Require(profileTextureProvider.Revision() == (7U << 2U),
+            "UI provider does not include its custom texture revision");
     Require(profileTextureProvider.Resolve(profileTextureIdentity, pixels,
                                            &error) &&
                 pixels.provisional && pixels.native_stand_in && pixels.width == 8U &&
@@ -569,6 +571,82 @@ int main() {
                     !IsUiHdAtlasSize(1000U, 500U, 512U, 256U) && !IsUiHdAtlasSize(0U, 0U, 512U, 256U),
                 "HD UI atlas sizes must be whole multiples of the native atlas");
     }
+
+    // The song list uses its own atlas, not the dialogue button atlas. Exercise
+    // the provider's final native/pack selection and binding invalidation. The
+    // pack's cached pixels must stay unlabelled so swapping restores L/R.
+    Require(seedCtxbSource(512, 256, 0x675B, 0, 0x20000000U), "ocarina CTXB metadata");
+    const oot3d::ui::UiTextureIdentity songAtlas{
+        kCtxbSource, 0x20000000U, "oot3d/native/pause_shared/ocarina_page"};
+    for (const std::uint32_t scale : {1U, 3U}) {
+        const auto width = 512U * scale, height = 256U * scale;
+        auto art = std::make_shared<std::vector<std::uint8_t>>(width * height * 4U, 0);
+        const auto fill = [&](std::uint32_t cellX, unsigned x0, unsigned y0, unsigned x1, unsigned y1,
+                              std::uint8_t color) {
+            for (auto y = (160U + y0) * scale; y < (160U + y1) * scale; ++y) {
+                for (auto x = (cellX + x0) * scale; x < (cellX + x1) * scale; ++x) {
+                    const auto pixel = (y * width + x) * 4U;
+                    (*art)[pixel] = (*art)[pixel + 1] = (*art)[pixel + 2] = color;
+                    (*art)[pixel + 3] = 255;
+                }
+            }
+        };
+        for (const auto x : {208U, 224U}) {
+            fill(x, 1, 1, 15, 15, 40);
+            fill(x, 2, 2, 14, 14, 200);
+            fill(x, 5, 3, 7, 12, 24);
+            if (x == 208U) fill(x, 5, 10, 11, 12, 24);
+            else {
+                fill(x, 5, 3, 10, 5, 24);
+                fill(x, 9, 3, 11, 9, 24);
+                fill(x, 5, 7, 10, 9, 24);
+                fill(x, 9, 9, 11, 12, 24);
+            }
+        }
+        const auto originalArt = *art;
+        Oot3dNativeA32UiTextureProvider songProvider(picaMemory);
+        std::uint64_t revision = 9;
+        songProvider.SetCustomTextureSource({
+            [&](const Oot3dNativeUiCustomTextureRequest&) {
+                Oot3dNativeUiCustomTexture custom;
+                custom.state = Oot3dNativeUiCustomTexture::State::Ready;
+                custom.width = width;
+                custom.height = height;
+                custom.rgba8 = art;
+                custom.legacy_hash = 0;
+                return custom;
+            }, [&] { return revision; }});
+        for (const std::uint8_t mask : {3U, 0U, 1U, 2U}) {
+            Fast::Oot3d::SetMessageShoulderGlyphs(mask);
+            Require(songProvider.Revision() == (revision << 2U | mask),
+                    "song atlas does not invalidate when the bindings change");
+            Require(songProvider.Resolve(songAtlas, pixels, &error), "song atlas resolve");
+            std::array<unsigned, 2> changes{};
+            const auto output = pixels.Data();
+            for (unsigned y = 0; y < height; ++y) {
+                for (unsigned x = 0; x < width; ++x) {
+                    const auto pixel = (y * width + x) * 4U;
+                    const bool changed = !std::equal(output.begin() + pixel, output.begin() + pixel + 4,
+                                                    art->begin() + pixel);
+                    Require(output[pixel + 3] == (*art)[pixel + 3], "song plates retain their shape");
+                    const bool left = x >= 208U * scale && x < 224U * scale;
+                    const bool right = x >= 224U * scale && x < 240U * scale;
+                    const bool row = y >= 160U * scale && y < 176U * scale;
+                    if (changed) {
+                        Require(row && ((left && (mask & 1U)) || (right && (mask & 2U))),
+                                "song relabel changed another note, song art or unbound shoulder");
+                        ++changes[right ? 1 : 0];
+                    }
+                }
+            }
+            Require((changes[0] != 0) == ((mask & 1U) != 0) &&
+                        (changes[1] != 0) == ((mask & 2U) != 0), "song shoulders follow each binding");
+            Require(*art == originalArt, "song relabel modified shared pack pixels");
+        }
+        ++revision;
+        Require(songProvider.Revision() == (revision << 2U | 2U), "pack revision still invalidates song art");
+    }
+    Fast::Oot3d::SetMessageShoulderGlyphs(0);
 
     std::cout << "oot3d_native_ui_texture_provider_tests: ok\n";
     return 0;

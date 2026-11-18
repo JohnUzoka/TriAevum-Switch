@@ -52,6 +52,7 @@ struct TopScreenFreeCameraState {
   bool Smoothing = true;
   bool N64StyleZoom = false;
   std::uint8_t ZoomPercent = 100U;
+  std::uint8_t FreeZoomPercent = 100U;
   std::uint8_t FovPercent = 100U;
   std::int16_t Pitch = 0;
   std::int16_t Yaw = 0;

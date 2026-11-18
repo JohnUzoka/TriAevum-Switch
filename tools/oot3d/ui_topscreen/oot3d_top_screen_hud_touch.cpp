@@ -274,6 +274,8 @@ ResolveTopScreenTouchPoll(TopScreenTouchTracker &tracker,
       // One pointer, as the 3DS touchscreen has: later fingers are ignored.
       if (!pageOwned) {
         finger.Owner = TopScreenTouchOwner::Page;
+        finger.PendingPolls =
+            std::max(finger.PendingPolls, kTopScreenGuestMinimumPressPolls);
         pageOwned = true;
       }
       continue;
@@ -287,7 +289,7 @@ ResolveTopScreenTouchPoll(TopScreenTouchTracker &tracker,
     if (finger.Control != TopScreenHudTouchControl::None) {
       finger.Owner = TopScreenTouchOwner::Hud;
       finger.PendingPolls =
-          std::max(finger.PendingPolls, kTopScreenHudMinimumPressPolls);
+          std::max(finger.PendingPolls, kTopScreenGuestMinimumPressPolls);
     } else if (context.AimEnabled && !aimOwned) {
       // One aim finger at a time; its motion counts from where it landed.
       finger.Owner = TopScreenTouchOwner::Aim;

@@ -27,8 +27,9 @@ lights and the shadows on one page, each keeping its owner; see
 - Relative mouse free-camera motion no longer passes through the C-stick
   dead zone, clamp, smoothing, aim speed or aim inversion.
 - Native aim and free-camera select their physical sources independently.
-- TopScreen camera zoom composes with the free-camera orbit; global renderer
-  FOV and TopScreen camera FOV remain separate controls.
+- Regular-camera and free-camera zoom have independent distance controls.
+  An older combined value initially supplies both until separately changed.
+  Global renderer FOV and TopScreen camera FOV remain separate controls.
 - Mouse deltas are drained while UI owns the pointer, and capture transitions
   cannot inject a stale camera jump.
 - Input and TopScreen controls remain usable as session previews even without

@@ -1,5 +1,6 @@
 #include "oot3d_native_ui_texture_provider.h"
 
+#include "fast/oot3d/message_button_glyphs.h"
 #include "fast/renderer/content_hash.h"
 #include "oot3d/renderer/pica_texture_decode.h"
 
@@ -299,7 +300,27 @@ bool Oot3dNativeA32UiTextureProvider::Resolve(
     const oot3d::ui::UiTextureIdentity& identity,
     oot3d::ui::UiTexturePixels& pixels, std::string* error) const {
     ++mStats.resolve_calls;
-    return ResolvePixels(identity, pixels, error, false);
+    if (!ResolvePixels(identity, pixels, error, false)) return false;
+    const auto mask = Fast::Oot3d::MessageShoulderGlyphs();
+    if (identity.semantic_name == "oot3d/native/pause_shared/ocarina_page" && mask != 0U &&
+        IsUiHdAtlasSize(pixels.width, pixels.height, 512U, 256U)) {
+        // The song guide samples menu_okarina_parts00, not message/parts:
+        // native note table 0x0050A1E0 maps L/R to (208/224,160), 16x16.
+        // Relabel after pack resolution so native and HD art use the bindings.
+        if (pixels.shared_rgba8) {
+            pixels.rgba8.assign(pixels.shared_rgba8->begin(), pixels.shared_rgba8->end());
+            pixels.shared_rgba8.reset();
+        }
+        const auto scale = pixels.width / 512U;
+        for (const auto& cell : std::array<Fast::Oot3d::MessageShoulderCell, 2>{{
+                 {208U, 160U, Fast::Oot3d::kMessageGlyphZl},
+                 {224U, 160U, Fast::Oot3d::kMessageGlyphZr}}}) {
+            if ((mask & cell.Glyph) == 0U) continue;
+            auto* start = pixels.rgba8.data() + (cell.Y * scale * pixels.width + cell.X * scale) * 4U;
+            Fast::Oot3d::detail::RewriteShoulderCell(start, start, pixels.width * 4U, 16U * scale);
+        }
+    }
+    return true;
 }
 
 void Oot3dNativeA32UiTextureProvider::RequestAhead(
@@ -732,7 +753,9 @@ void Oot3dNativeA32UiTextureProvider::FinishCustomTexture(const Oot3dNativeUiCus
 }
 
 std::uint64_t Oot3dNativeA32UiTextureProvider::Revision() const noexcept {
-    return mCustomTextures.revision ? mCustomTextures.revision() : 0U;
+    // Two binding bits also invalidate the already uploaded song-guide atlas.
+    const auto packRevision = mCustomTextures.revision ? mCustomTextures.revision() : 0U;
+    return (packRevision << 2U) | Fast::Oot3d::MessageShoulderGlyphs();
 }
 
 const Oot3dNativeUiTextureProviderStats&

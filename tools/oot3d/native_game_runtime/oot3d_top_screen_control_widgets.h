@@ -14,6 +14,7 @@ inline void CopyTopScreenControlSettings(const TopScreenUiConfig& source, TopScr
     target.SelectAction = source.SelectAction;
     target.ExitItemsToSaveScreen = source.ExitItemsToSaveScreen;
     target.CameraZoomPercent = source.CameraZoomPercent;
+    target.FreeCameraZoomPercent = source.FreeCameraZoomPercent;
     target.CameraFovPercent = source.CameraFovPercent;
     target.ChildDpad = source.ChildDpad;
     target.AdultDpad = source.AdultDpad;
@@ -39,8 +40,13 @@ inline bool DrawTopScreenCameraBehavior(TopScreenUiConfig& config) {
     changed |= ImGui::Checkbox("Invert X##freecam", &config.FreeCameraInvertX);
     changed |= ImGui::Checkbox("Invert Y##freecam", &config.FreeCameraInvertY);
     int zoom = config.CameraZoomPercent, fov = config.CameraFovPercent;
-    if (ControlWidgets::SliderInt("Camera zoom", &zoom, kTopScreenCameraZoomMinimum, kTopScreenCameraZoomMaximum, "%d%%")) {
+    if (ControlWidgets::SliderInt("Regular camera zoom", &zoom, kTopScreenCameraZoomMinimum, kTopScreenCameraZoomMaximum, "%d%%")) {
         config.CameraZoomPercent = static_cast<uint8_t>(zoom / 5 * 5);
+        changed = true;
+    }
+    int freeZoom = config.FreeCameraZoomPercent;
+    if (ControlWidgets::SliderInt("Free camera zoom", &freeZoom, kTopScreenCameraZoomMinimum, kTopScreenCameraZoomMaximum, "%d%%")) {
+        config.FreeCameraZoomPercent = static_cast<uint8_t>(freeZoom / 5 * 5);
         changed = true;
     }
     if (ControlWidgets::SliderInt("Field of view", &fov, kTopScreenCameraFovMinimum, kTopScreenCameraFovMaximum, "%d%%")) {

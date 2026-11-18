@@ -1195,6 +1195,8 @@ void WriteNativeA32WindowRuntimeSummary(const NativeA32WindowSummaryInputs &in) 
                activeTopScreenConfig.ExitItemsToSaveScreen},
               {"camera_zoom_percent",
                activeTopScreenConfig.CameraZoomPercent},
+              {"free_camera_zoom_percent",
+               activeTopScreenConfig.FreeCameraZoomPercent},
               {"camera_fov_percent",
                activeTopScreenConfig.CameraFovPercent},
               {"dpad_child",

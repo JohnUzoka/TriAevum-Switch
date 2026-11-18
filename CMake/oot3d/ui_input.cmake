@@ -403,7 +403,8 @@ add_executable(oot3d_native_a32_input_tests EXCLUDE_FROM_ALL
     tools/oot3d/native_game_runtime/oot3d_native_a32_input_tests.cpp
 )
 target_link_libraries(oot3d_native_a32_input_tests PRIVATE
-    oot3d_native_a32_input)
+    oot3d_native_a32_input
+    oot3d_ui_topscreen)
 # The Switch page-touch test places a page with the renderer's own plans.
 target_include_directories(oot3d_native_a32_input_tests PRIVATE
     runtime/three_ds_recomp/include)

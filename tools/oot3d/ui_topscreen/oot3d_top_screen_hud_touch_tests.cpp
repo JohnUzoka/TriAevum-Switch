@@ -426,16 +426,18 @@ void TestTracker() {
   Require(result.PagePressed && Near(result.PageX, 0.5F) &&
               result.HudButtons == 0U,
           "a second finger does not move the pointer");
-  // A quick page tap is delivered once, as the old SDL latch did.
+  // A quick page tap spans the game's two-refresh update interval.
   tracker.Reset();
   tracker.ObserveSample(first);
   tracker.ObserveSample({});
   Require(ResolveTopScreenTouchPoll(tracker, page, false).PagePressed,
           "a page tap waits for a refresh");
   Require(ResolveTopScreenTouchPoll(tracker, page, true).PagePressed,
-          "a page tap reaches one refresh");
+          "a page tap reaches the first refresh");
+  Require(ResolveTopScreenTouchPoll(tracker, page, true).PagePressed,
+          "a page tap reaches the second refresh");
   Require(!ResolveTopScreenTouchPoll(tracker, page, true).PagePressed,
-          "a page tap is delivered once");
+          "a page tap is released after two refreshes");
 
   // A page-owned finger never becomes a HUD press when the page closes, and
   // a HUD press stops while a page is open.

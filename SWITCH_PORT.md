@@ -1333,6 +1333,35 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   hand (Put Away), aim the slingshot, Z-target: the D-pad items stay grey with the game's Y/X/I/II, without
   blinking, and are usable again when the item is put away.
 
+### Issue #20: quick map taps, ocarina labels and independent zoom (11/17)
+- **Touch:** native-page taps previously lasted one consuming 60 Hz refresh, so a short contact could expire
+  before a 30 Hz menu update. Page and HUD taps now both last at least two consuming refreshes. Real map
+  placement/tracker/native-mapper smoke covers both update phases; ownership and map coordinates are unchanged.
+  Game Over still needs the exact save/continue prompt and a clip: its native page gate and source-payload
+  coordinate suppression in phases 3-6 are not safely changed from this report alone.
+- **Song guide:** `menu_okarina_parts00.ctxb` uses different shoulder cells from the dialogue atlas. The UI
+  texture provider relabels (208,160)/(224,160), 16x16, from current binding bits after native/HD pack selection.
+  Defaults show ZL/ZR; swapping shoulders/triggers restores L/R. Binding changes invalidate the provider's
+  revision; shared pack art is immutable. Actual EUR ETC1A4 provider/guide smoke verifies cells, alpha and UVs.
+- **Zoom:** Controls > Camera now has Regular camera zoom and Free camera zoom, independently applied to the
+  native Camera_Normal1 scalar and free orbit distance. `free_camera_zoom_percent` is saved in the UI config;
+  older v1/v2 combined values initially supply both distances. The ordinary zoom hook/chord remains ordinary
+  zoom. Host parse/save/orbit/scalar checks prove changing one does not change the other; no console check yet.
+- **HD text stall:** source trace does not establish a performance cause without matching hardware logs. QBF
+  coverage loads at startup; changed native text atlases incur generation/decode/upload. No guessed cache or
+  timing change. To isolate fonts, close the game, rename `config/font_coverage.zip` to
+  `font_coverage.zip.disabled`, restart, and repeat the same dialogue. Restore the name and restart to undo.
+  HUD art remains installed; HD texture size/internal scene resolution do not control QBF coverage. A HUD
+  reimport can recreate the file. Request each run's logs, NPC/location and clip. Keep #20 open.
+
+### Issue #16 follow-up: recorded boots requests succeed (0.2.8-test.1, 11/17)
+- Reporter confirms whirlpools no longer slow down and supplies a boots log/clip. All 13 recorded requests
+  are eligible (seven equip, six remove); all 12 checkable later snapshots have the requested save/live boots.
+  The clip does not isolate a failed press followed by native-button success. Native boots side effects
+  match our consumer. No restriction bypass or speculative persistent-state reset added. Request the precise
+  failed timestamp and adult shortcut bindings before the reassignment workaround; if not captured, a fresh
+  launch and same-room failed D-pad/native-button comparison. Keep boots open; no new fix claimed.
+
 ### New issue triage: shader coverage, boots diagnostics and startup failures (issues #16-19, 11/17)
 - **Shaders (#18/#19):** the Barinade/Royal Family Tomb upload contains 24 fragment texts absent from 0.2.7;
   the Fire Temple/Zelda upload contains 138 texts, 85 absent. Four overlap: 105 unique new source texts, retained

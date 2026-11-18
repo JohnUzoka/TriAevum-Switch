@@ -1,10 +1,12 @@
 #include "oot3d_native_a32_input.h"
+#include "oot3d_top_screen_hud_touch.h"
 #include "oot3d_top_screen_page_layout.h"
 
 #include "fast/backends/gfx_deko3d_pica_pipeline.h"
 #include "fast/oot3d/gl_widescreen_menu_policy.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -248,6 +250,54 @@ void TestSwitchPageTouchLandsOnTheTappedElement() {
             "the widened Items gap left the gap");
 }
 
+// Host input is published at the CTR's 60 Hz refresh rate, but the native
+// pause controller updates every other refresh. Drive the real touch tracker
+// and pointer mapper from the renderer's page placement for both update phases.
+void TestQuickSwitchMapTapReachesEitherUpdatePhase() {
+    constexpr PageDraw pages[]{
+        {40.0F, 320.0F, -1.0F / 160.0F, 1.0F}, // World Map
+        {0.0F, 400.0F, kTopScreenWidePageScale, kTopScreenWidePageOffset}, // Dungeon Map
+    };
+    constexpr ScreenPoint points[]{{20, 120}, {160, 120}, {300, 120}, {160, 221}};
+    const TopScreenTouchPollContext pageContext{true, false, nullptr, 1280U, 720U, true};
+    for (const auto& page : pages) {
+        for (const auto& point : points) {
+            const auto screen = SwitchScreenPoint(page, point.X, point.Y);
+            for (unsigned updatePhase = 0U; updatePhase < 2U; ++updatePhase) {
+                TopScreenTouchTracker tracker;
+                const std::array contact{TopScreenTouchContact{
+                    1U, static_cast<float>(screen.X) / 1280.0F,
+                    static_cast<float>(screen.Y) / 720.0F}};
+                tracker.ObserveSample(contact);
+                tracker.ObserveSample({}); // The whole tap happened between polls.
+                bool gameSawTap = false;
+                for (unsigned refresh = 0U; refresh < 4U; ++refresh) {
+                    const auto waiting = ResolveTopScreenTouchPoll(tracker, pageContext, false);
+                    Require(waiting.PagePressed == (refresh < 2U),
+                            "an intervening host poll consumed or repeated a map tap");
+                    const auto result = ResolveTopScreenTouchPoll(tracker, pageContext, true);
+                    const auto touch = MapHostPointerToNativeA32Touch(
+                        static_cast<int32_t>(result.PageX * 1280.0F),
+                        static_cast<int32_t>(result.PageY * 720.0F), 1280U, 720U,
+                        result.PagePressed, NativeA32TouchPresentation::TopScreenCentredPage);
+                    Require(touch.Pressed == (refresh < 2U),
+                            "a quick map tap did not span exactly two guest refreshes");
+                    Require(result.HudButtons == 0U && result.AimDeltaX == 0.0F &&
+                                result.AimDeltaY == 0.0F && !result.MenuPressed,
+                            "a map tap leaked to gameplay or the host menu");
+                    if (refresh % 2U == updatePhase && touch.Pressed) {
+                        Require(touch.Inside && std::abs(static_cast<int>(touch.X) - point.X) <= 1 &&
+                                    std::abs(static_cast<int>(touch.Y) - point.Y) <= 1,
+                                "a map tap did not reach its drawn native touch coordinate");
+                        gameSawTap = true;
+                    }
+                }
+                Require(gameSawTap, "the 30 Hz map update missed a quick tap on one refresh phase");
+            }
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -258,6 +308,7 @@ int main(int argc, char** argv) {
     Require(argc == 1, "usage: [--emit-mouse-aim FILE pitch|yaw]");
     TestShoulderMappings();
     TestSwitchPageTouchLandsOnTheTappedElement();
+    TestQuickSwitchMapTapReachesEitherUpdatePhase();
     const auto mousePreset = NativeControlPreset(NativeControlProfile::KeyboardMouse);
     const auto controllerPreset = NativeControlPreset(NativeControlProfile::Controller);
     Require(mousePreset.NativeAimSource == NativeMotionSource::Mouse &&

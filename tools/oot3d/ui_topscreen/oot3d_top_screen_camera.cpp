@@ -180,6 +180,7 @@ void ApplyTopScreenFreeCameraConfig(
     state.Active = false;
   }
   state.ZoomPercent = config.CameraZoomPercent;
+  state.FreeZoomPercent = config.FreeCameraZoomPercent;
   state.FovPercent = config.CameraFovPercent;
   state.N64StyleZoom = state.ZoomPercent != 100U;
   state.SpeedNotificationFrames = 0U;
@@ -292,7 +293,7 @@ TopScreenFreeCameraOrbit BuildTopScreenFreeCameraOrbit(
       (input.ChildLink ? 150.0F : 200.0F) -
       50.0F * TopScreenBinarySine(pitch);
   const float targetDistance = nativeTargetDistance *
-      static_cast<float>(state.ZoomPercent) * 0.01F;
+      static_cast<float>(state.FreeZoomPercent) * 0.01F;
   state.Distance += (targetDistance - state.Distance) *
                     (state.Smoothing ? kTopScreenFreeCameraDistanceStep : 1.0F);
   result.IntendedEye.X -=

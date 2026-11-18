@@ -172,6 +172,7 @@ bool DecodeLegacyTopScreenUiConfig(const nlohmann::json &document,
     return false;
   }
   parsed.CameraZoomPercent = legacyZoom ? 130U : 100U;
+  parsed.FreeCameraZoomPercent = parsed.CameraZoomPercent;
   if (document.contains("free_camera_speed")) {
     constexpr std::array<std::uint8_t, 7> kLegacySpeeds{
         2U, 3U, 4U, 6U, 8U, 12U, 16U};
@@ -219,7 +220,7 @@ bool DecodeTopScreenUiConfig(const nlohmann::json &document,
     return false;
   }
 
-  constexpr std::array<std::string_view, 24> kAllowedFields{
+  constexpr std::array<std::string_view, 25> kAllowedFields{
       "schema",
       // Read and ignored (the Restoration HUD was removed; see above).
       "hud_layout",
@@ -234,6 +235,7 @@ bool DecodeTopScreenUiConfig(const nlohmann::json &document,
       "select_action",
       "exit_items_to_save_screen",
       "camera_zoom_percent",
+      "free_camera_zoom_percent",
       "camera_fov_percent",
       "dpad_child",
       "dpad_adult",
@@ -313,6 +315,12 @@ bool DecodeTopScreenUiConfig(const nlohmann::json &document,
                    &parsed.CameraZoomPercent) ||
       !readPercent("camera_fov_percent", kTopScreenCameraFovMinimum,
                    kTopScreenCameraFovMaximum, &parsed.CameraFovPercent)) {
+    return false;
+  }
+  // Keep the old combined distance until the player changes either slider.
+  parsed.FreeCameraZoomPercent = parsed.CameraZoomPercent;
+  if (!readPercent("free_camera_zoom_percent", kTopScreenCameraZoomMinimum,
+                   kTopScreenCameraZoomMaximum, &parsed.FreeCameraZoomPercent)) {
     return false;
   }
   if (document.contains("select_action") &&
@@ -697,6 +705,7 @@ bool SerializeTopScreenUiConfigText(const TopScreenUiConfig &config,
       {"select_action", TopScreenSelectActionName(config.SelectAction)},
       {"exit_items_to_save_screen", config.ExitItemsToSaveScreen},
       {"camera_zoom_percent", config.CameraZoomPercent},
+      {"free_camera_zoom_percent", config.FreeCameraZoomPercent},
       {"camera_fov_percent", config.CameraFovPercent},
       {"dpad_child",
        {action(config.ChildDpad[0]), action(config.ChildDpad[1]),
