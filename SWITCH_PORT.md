@@ -722,6 +722,19 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   (`TestRawTextureCopy`). What remains is the GPU wait: a capture still waits for everything the
   frame drew before it. [INFERENCE: the gain is not measured; the player's logs with this build
   give the capture time.]
+- **Cost, part 2 (issue #19, build 57, 11/18):** Zelda's flashback copies the whole top screen into a
+  texture every frame for its sepia filter and ran at 15 FPS: `texture_copies ... 38.5 ms each`, one copy
+  a frame, `pica_submit` ~50 ms, dkperf `gpu_ms` ~70. The capture held the guest (a dependency flush)
+  while `dkQueueWaitIdle` drained everything queued before the read-back; dkperf's 70 ms is the span
+  between the frame's top and scene-end timestamps around that stall, not GPU work. Now
+  `PicaTargets::BeginCopyRows` submits the row reads with a fence, the guest's bytes are deferred to its
+  first read of the destination (`PhysicalMemoryDefer`, as Vulkan) and PPF is raised at once;
+  `ResolvePicaTextureCopy` takes the read-back before a draw that samples the copy, at a deferred guest
+  read, before the next copy, and before resets and shutdown. A refused deferral keeps the eager path.
+  Log: `deferred N` and `read-back wait / encode` in `texture_copies`. Remaining cost: the scene before the
+  copy is drawn twice a frame (dependency namespace and presentation). The sepia filter itself was the
+  missing `frag_8edf3b189196514f` (uber path, one draw per copy), now in console-missing. Test:
+  `TestRawTextureCopy`. [INFERENCE: expected 20-30 FPS, not 60; console logs from 0.2.8-test.3 decide.]
 
 ### D-pad items for child and adult Link (SingleScreen 3.2.2 buttons 6..9, 11/10)
 - **Asked:** the Single Screen photos show items on the D-pad. 3.2.2 lets each direction hold
@@ -1353,6 +1366,20 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   `font_coverage.zip.disabled`, restart, and repeat the same dialogue. Restore the name and restart to undo.
   HUD art remains installed; HD texture size/internal scene resolution do not control QBF coverage. A HUD
   reimport can recreate the file. Request each run's logs, NPC/location and clip. Keep #20 open.
+
+### Issue #20 follow-up: Game Over and dungeon Map touch, song ZR glyph (0.2.8-test.2, 11/18)
+- **Touch:** the TopScreen touch helper (record 28) blanks the native touch state during the Game Over
+  phases and on the Map page inside a dungeon, two screens the 3DS mod removes from the touch screen. This
+  port draws both on its one screen, so the Game Over clause now lifts once the choices are drawn
+  (`TopScreenGameOverChoicesPresented`; they own the touch screen through `TopScreenNativeTouchPageActive`
+  although they are not a pause page), and the dungeon Map clause is not ported. The dungeon Map's side
+  columns are drawn 40 pixels outwards while their native touch rectangles stay, so taps on the item and
+  floor columns are mapped back (`TopScreenWideDungeonMapPage`). Assumes centred Game Over choices (issue 46
+  capture); not measured on console. Tests: input and mod profile suites.
+- **ZR glyph:** the relabel draws the Z with the stroke width of the letter's stem, now the lower quartile of
+  the stem runs over the middle rows (`message_button_glyphs.h`). The median picked up the song list's small
+  R crossbar/leg (3.38 px), drawing the Z as a solid dark block. Dialogue icons change by 200 bytes,
+  visually identical. Test: provider song-atlas ZL/ZR pixels at 1x/3x.
 
 ### Issue #16 follow-up: recorded boots requests succeed (0.2.8-test.1, 11/17)
 - Reporter confirms whirlpools no longer slow down and supplies a boots log/clip. All 13 recorded requests

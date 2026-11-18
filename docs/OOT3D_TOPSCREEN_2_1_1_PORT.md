@@ -152,7 +152,10 @@ Dungeon Map shares the full viewport and page projection: Map state
 World Map stays centred. Verified scalar contracts widen both the dungeon
 panel and title to 272 pixels and move the side columns; six native icon
 coordinate hooks set R2 to -30 while retaining the ownership branches.
-Dungeon Map omits both extra pause edges but keeps the tab hints.
+Dungeon Map omits both extra pause edges but keeps the tab hints. The moved
+columns keep their native touch rectangles, so a tap on the left column or the
+floor column is mapped 40 pixels back (`TopScreenWideDungeonMapPage`,
+`oot3d_top_screen_page_layout.h`); between them the page stays at X + 40.
 
 Scene mode 5 (the file select and the other frontend screens) has no pause
 edges: 2.1.1 0x005D2078 leaves through 0x005D18F0 (scene owner byte +0x100

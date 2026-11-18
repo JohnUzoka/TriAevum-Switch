@@ -8,7 +8,10 @@
 // rows that EncodePicaFramebuffer samples (PlanPicaCopyRowReads), encodes them
 // as the guest's framebuffer bytes and keeps each version's destination bytes:
 // a texture takes them in place of the zeros, and the guest gets them when the
-// copy completes. Pure parts.
+// copy completes. The read-back is recorded and submitted at the copy and
+// waited for only when the bytes are needed (the version is Pending until
+// then): by a draw that samples them, by the guest reading the deferred
+// destination, or by the next copy. Pure parts.
 
 #include "fast/backends/gfx_deko3d_pica_pipeline.h"
 #include "fast/renderer3ds/pica_framebuffer_encode.h"
@@ -20,6 +23,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
@@ -149,25 +153,31 @@ struct PicaCopyRowRead {
     return reads;
 }
 
-// Each captured copy version's destination bytes, by CompletionId.
+// Each captured copy version's destination bytes, by CompletionId. Versions
+// are shared: the guest's deferred read of a copy (PhysicalMemoryDefer) keeps
+// its version after the pin set released it.
 class PicaCopyStore {
   public:
     struct Version {
         std::vector<Renderer3ds::PicaRawCopySpan> Spans;
-        std::vector<uint8_t> Bytes; // the spans' destination bytes, concatenated
-        bool Materialized = false;  // the guest got them and the copy's completion
-    };
+        std::vector<uint8_t> Bytes; // the spans' destination bytes, concatenated (empty if not encoded)
+        bool Pending = false;       // its read-back is submitted and not taken yet: no bytes so far
+        bool Materialized = false;  // the guest got them (or their deferral) and the copy's completion
 
-    [[nodiscard]] const Version* Find(uint64_t completionId) const {
+        [[nodiscard]] bool HasBytes() const noexcept { return !Pending && !Bytes.empty(); }
+    };
+    using VersionPtr = std::shared_ptr<Version>;
+
+    [[nodiscard]] VersionPtr Find(uint64_t completionId) const {
         const auto found = mVersions.find(completionId);
-        return found == mVersions.end() ? nullptr : &found->second;
+        return found == mVersions.end() ? nullptr : found->second;
     }
-    const Version& Put(uint64_t completionId, Version version) {
+    const VersionPtr& Put(uint64_t completionId, VersionPtr version) {
         return mVersions.insert_or_assign(completionId, std::move(version)).first->second;
     }
     void MarkMaterialized(uint64_t completionId) {
         if (const auto found = mVersions.find(completionId); found != mVersions.end()) {
-            found->second.Materialized = true;
+            found->second->Materialized = true;
         }
     }
     // SetPinnedPicaTextureCopies: a version no pinned reference names can no
@@ -180,48 +190,79 @@ class PicaCopyStore {
         std::erase_if(mVersions, [&](const auto& entry) { return !kept.contains(entry.first); });
     }
     // `view` with the captured bytes where its copy references point, held in
-    // `scratch`; false when no reference has a captured version (the view keeps
-    // the frontend's zeros there).
+    // `scratch`; false when no reference has a version with bytes (the view
+    // keeps the frontend's zeros there). A Pending version has none yet: the
+    // backend takes its read-back before a draw samples it.
     [[nodiscard]] bool Fill(const Renderer3ds::PicaTextureView& view, std::vector<uint8_t>& scratch,
-                            Renderer3ds::PicaTextureView& filled) const {
-        bool any = false;
-        for (const auto& reference : view.CopyReferences) {
-            const Version* version = Find(reference.CompletionId);
-            if (version == nullptr) {
-                continue;
-            }
-            if (!any) {
-                scratch.assign(view.NativeBytes.begin(), view.NativeBytes.end());
-                any = true;
-            }
-            const uint64_t low = std::max<uint64_t>(reference.PhysicalAddress, view.PhysicalAddress);
-            const uint64_t high = std::min<uint64_t>(uint64_t{reference.PhysicalAddress} + reference.ByteCount,
-                                                     uint64_t{view.PhysicalAddress} + scratch.size());
-            size_t at = 0U;
-            for (const auto& span : version->Spans) {
-                const uint64_t spanLow = span.DestinationAddress;
-                const uint64_t from = std::max(low, spanLow);
-                const uint64_t to = std::min(high, spanLow + span.ByteCount);
-                if (from < to) {
-                    std::memcpy(scratch.data() + (from - view.PhysicalAddress),
-                                version->Bytes.data() + at + (from - spanLow), static_cast<size_t>(to - from));
-                }
-                at += span.ByteCount;
-            }
-        }
-        if (!any) {
-            return false;
-        }
-        filled = view;
-        filled.NativeBytes = scratch;
-        filled.NativeContentHashAvailable = false;
-        filled.NativeBaseLevelContentHashAvailable = false;
-        return true;
-    }
+                            Renderer3ds::PicaTextureView& filled) const;
     [[nodiscard]] size_t Count() const noexcept { return mVersions.size(); }
 
   private:
-    std::unordered_map<uint64_t, Version> mVersions;
+    std::unordered_map<uint64_t, VersionPtr> mVersions;
 };
+
+// The bytes `version` wrote over physical [address, address + out.size()),
+// into `out`; bytes no span wrote keep what `out` held. False (out untouched)
+// when the version has no bytes: a pending one, or one whose read-back failed.
+// The guest's deferred read of the destination and a texture's fill.
+inline bool ReadPicaCopyBytes(const PicaCopyStore::Version& version, uint64_t address, std::span<uint8_t> out) {
+    if (!version.HasBytes()) {
+        return false;
+    }
+    const uint64_t end = address + out.size();
+    size_t at = 0U;
+    for (const auto& span : version.Spans) {
+        const uint64_t spanLow = span.DestinationAddress;
+        const uint64_t from = std::max(address, spanLow);
+        const uint64_t to = std::min(end, spanLow + span.ByteCount);
+        if (from < to && at + span.ByteCount <= version.Bytes.size()) {
+            std::memcpy(out.data() + (from - address), version.Bytes.data() + at + (from - spanLow),
+                        static_cast<size_t>(to - from));
+        }
+        at += span.ByteCount;
+    }
+    return true;
+}
+
+inline bool PicaCopyStore::Fill(const Renderer3ds::PicaTextureView& view, std::vector<uint8_t>& scratch,
+                                Renderer3ds::PicaTextureView& filled) const {
+    bool any = false;
+    for (const auto& reference : view.CopyReferences) {
+        const auto found = mVersions.find(reference.CompletionId);
+        if (found == mVersions.end() || !found->second->HasBytes()) {
+            continue;
+        }
+        if (!any) {
+            scratch.assign(view.NativeBytes.begin(), view.NativeBytes.end());
+            any = true;
+        }
+        const uint64_t low = std::max<uint64_t>(reference.PhysicalAddress, view.PhysicalAddress);
+        const uint64_t high = std::min<uint64_t>(uint64_t{reference.PhysicalAddress} + reference.ByteCount,
+                                                 uint64_t{view.PhysicalAddress} + scratch.size());
+        if (low < high) {
+            (void)ReadPicaCopyBytes(*found->second, low,
+                                    std::span(scratch.data() + (low - view.PhysicalAddress),
+                                              static_cast<size_t>(high - low)));
+        }
+    }
+    if (!any) {
+        return false;
+    }
+    filled = view;
+    filled.NativeBytes = scratch;
+    filled.NativeContentHashAvailable = false;
+    filled.NativeBaseLevelContentHashAvailable = false;
+    return true;
+}
+
+// Whether a draw's textures name copy `completionId`: its read-back is taken
+// before the draw prepares them.
+[[nodiscard]] inline bool PicaTexturesReferenceCopy(std::span<const Renderer3ds::PicaTextureView> textures,
+                                                    uint64_t completionId) noexcept {
+    return std::any_of(textures.begin(), textures.end(), [&](const auto& texture) {
+        return std::any_of(texture.CopyReferences.begin(), texture.CopyReferences.end(),
+                           [&](const auto& reference) { return reference.CompletionId == completionId; });
+    });
+}
 
 } // namespace Fast::Deko3d

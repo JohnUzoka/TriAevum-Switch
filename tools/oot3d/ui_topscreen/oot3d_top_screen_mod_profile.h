@@ -870,9 +870,15 @@ bool ResolveTopScreenPauseRouteActive(const TopScreenPauseDrawInputs &inputs,
                                       TopScreenPauseRouteState *state) noexcept;
 std::uint32_t ResolveTopScreenPauseRoutedCommand(std::uint32_t nativeCommand,
                                                  bool routeActive) noexcept;
+// Payload helper 0x005C8E0C hides the native touch coordinates on screens the
+// 3DS mod moved off the touch screen. This port draws two of them on the one
+// screen and maps touch onto them, so it keeps them touchable: the dungeon Map
+// (the payload's Map-page plus in-dungeon layer clause; its moved columns are
+// mapped by oot3d_top_screen_page_layout.h) and the Game Over choices once they
+// are drawn (gameOverChoicesPresented, TopScreenGameOverChoicesPresented).
 bool ResolveTopScreenTouchCoordinateSuppression(
     const TopScreenPauseDrawInputs &inputs, bool routeActive,
-    bool pauseCameraControlActive, bool secondaryLayerActive,
+    bool gameOverChoicesPresented,
     TopScreenTouchCoordinateRouteState *state) noexcept;
 bool ApplyTopScreenTouchCoordinateSuppression(NativeA32Memory &memory,
                                               std::string *error = nullptr);
@@ -884,6 +890,18 @@ bool PrepareTopScreenGameOverDraw(
     NativeA32Memory &memory, std::uint32_t controller,
     const TopScreenPauseDrawInputs &inputs, bool runtimeSceneLatch,
     TopScreenRendererVisibilityRouteState *state, std::string *error = nullptr);
+// The Game Over choices are on screen: the 60-call delay and the 24-step fade
+// have run and PrepareTopScreenGameOverDraw draws them centred (or a restored
+// savestate resumed them already shown).
+bool TopScreenGameOverChoicesPresented(
+    const TopScreenPauseDrawInputs &inputs, bool runtimeSceneLatch,
+    const TopScreenRendererVisibilityRouteState &route) noexcept;
+// A native page owns the touch screen: one of the four pause pages, or the
+// drawn Game Over choices (they belong to the native choice controller, not to
+// a pause page).
+bool TopScreenNativeTouchPageActive(
+    const TopScreenPauseDrawInputs &inputs, bool runtimeSceneLatch,
+    const TopScreenRendererVisibilityRouteState &gameOverRoute) noexcept;
 // Who handles Game Over (scene 3) in the native call 0x00300544.
 // In the product the hook at entry 0x00427A3C (PrepareTopScreenGameOverDraw +
 // viewport composition 0,40,480,320 / PauseUi_Draw / native draw) already does the

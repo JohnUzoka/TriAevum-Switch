@@ -410,6 +410,11 @@ bool GfxRenderingAPIDeko3d::SubmitPicaDraw(const GfxNativePicaDrawView& draw, st
     if (draw.FramebufferWidth == 0U || draw.FramebufferHeight == 0U) {
         return reject("PICA framebuffer has zero extent");
     }
+    // A draw sampling the copy still reading back takes it first (before the
+    // frame and target state below: the take may submit the frame).
+    if (mPendingCopy != nullptr && Deko3d::PicaTexturesReferenceCopy(draw.Textures, mPendingCopyId)) {
+        ResolvePicaTextureCopy();
+    }
     EnsureFrame();
     Deko3d::GrassObserveDraw(draw, mDevice.Frame()); // config/grass
     ObservePlayerShadowDraw(draw);                   // config/simple_shadow
@@ -984,10 +989,18 @@ bool GfxRenderingAPIDeko3d::SubmitPicaDisplayTransfer(const GfxNativePicaDisplay
 // execution owes the guest the bytes and the PPF completion it waits for; a
 // copy that cannot be captured still completes, with the guest's bytes and
 // the textures' zeros left as they were (logged), so the game goes on.
+//
+// The guest waits here (a dependency flush). The read-back is only submitted:
+// waiting for it at once held the guest for everything the GPU had queued
+// before it (the last presented frame and this one's scene), every frame of
+// an effect that copies the scene (issue #19: 38.5 ms a copy, 15 FPS). The
+// guest's bytes are deferred to its first read of the destination
+// (PhysicalMemoryDefer, as Vulkan) and the read-back is taken when something
+// needs the bytes: a draw sampling the copy, that read, or the next copy.
 bool GfxRenderingAPIDeko3d::SubmitPicaTextureCopy(const GfxNativePicaDisplayTransferView& transfer,
                                                   std::string* error) {
     auto& copies = mResources.Copies();
-    const Deko3d::PicaCopyStore::Version* version = copies.Find(transfer.CompletionId);
+    Deko3d::PicaCopyStore::VersionPtr version = copies.Find(transfer.CompletionId);
     if (version != nullptr && (!transfer.MaterializeGuest || version->Materialized)) {
         ++mCounters.PicaTextureCopiesReused;
         return true;
@@ -996,46 +1009,73 @@ bool GfxRenderingAPIDeko3d::SubmitPicaTextureCopy(const GfxNativePicaDisplayTran
     // guest's bytes come from the real one's namespace. On a failure, the
     // replay's bytes (if any) still serve.
     const auto started = std::chrono::steady_clock::now();
-    Deko3d::PicaCopyStore::Version captured;
-    if (const char* failure = CapturePicaTextureCopy(transfer, captured)) {
+    // One read-back is outstanding at a time.
+    ResolvePicaTextureCopy();
+    auto captured = std::make_shared<Deko3d::PicaCopyStore::Version>();
+    const char* failure = CapturePicaTextureCopy(transfer, captured);
+    if (failure != nullptr) {
         if (mCounters.PicaTextureCopiesFailed++ < 10U) {
             Deko3d::Log("texture copy not captured: %s (ns %llu, %08x -> %08x, %u bytes)", failure,
                         static_cast<unsigned long long>(transfer.RenderTargetNamespace),
                         transfer.InputPhysicalAddress, transfer.OutputPhysicalAddress, transfer.TextureCopyBytes);
         }
     } else {
-        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+        version = copies.Put(transfer.CompletionId, captured);
+    }
+    if (transfer.MaterializeGuest && version != nullptr) {
+        // A dependency flush: the guest is stopped. A copy still reading back
+        // is deferred: the guest's first read of the destination takes the
+        // read-back (on the render thread) and gets the bytes. The version is
+        // held by that read, whatever the pin set keeps.
+        const bool deferred =
+            version->Pending && mPhysicalMemoryDefer &&
+            mPhysicalMemoryDefer(version->Spans, [this, version](uint32_t address, std::span<uint8_t> bytes) {
+                if (version->Pending) {
+                    ResolvePicaTextureCopy();
+                }
+                // A read-back that failed leaves the guest's bytes, as an
+                // eager one does.
+                (void)Deko3d::ReadPicaCopyBytes(*version, address, bytes);
+                return true;
+            });
+        if (deferred) {
+            ++mCounters.PicaTextureCopiesDeferred;
+            copies.MarkMaterialized(transfer.CompletionId);
+        } else {
+            if (version->Pending) {
+                ResolvePicaTextureCopy();
+            }
+            if (version->HasBytes()) {
+                std::vector<Renderer3ds::PicaPhysicalMemoryWrite> writes;
+                writes.reserve(version->Spans.size());
+                size_t at = 0U;
+                for (const auto& span : version->Spans) {
+                    Renderer3ds::PicaPhysicalMemoryWrite write;
+                    write.Address = span.DestinationAddress;
+                    write.Bytes.assign(version->Bytes.begin() + static_cast<std::ptrdiff_t>(at),
+                                       version->Bytes.begin() + static_cast<std::ptrdiff_t>(at + span.ByteCount));
+                    writes.push_back(std::move(write));
+                    at += span.ByteCount;
+                }
+                if (mPhysicalMemoryCommit && mPhysicalMemoryCommit(writes)) {
+                    copies.MarkMaterialized(transfer.CompletionId);
+                } else if (mCounters.PicaTextureCopiesFailed++ < 10U) {
+                    Deko3d::Log("texture copy %08x -> %08x: the guest's memory was not written",
+                                transfer.InputPhysicalAddress, transfer.OutputPhysicalAddress);
+                }
+            }
+        }
+    }
+    if (failure == nullptr) {
+        // What the guest waited for: the recording and submission, and the
+        // read-back too when it could not be deferred.
+        const double ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
         mCounters.PicaTextureCopyMilliseconds += ms;
         mCounters.PicaTextureCopyMaxMilliseconds = std::max(mCounters.PicaTextureCopyMaxMilliseconds, ms);
-        if (mCounters.PicaTextureCopies++ == 0U) {
-            Deko3d::Log("pica: first texture copy (%u bytes in %zu spans, %08x -> %08x, %.1f ms)",
-                        transfer.TextureCopyBytes, captured.Spans.size(), transfer.InputPhysicalAddress,
-                        transfer.OutputPhysicalAddress, ms);
-        }
-        version = &copies.Put(transfer.CompletionId, std::move(captured));
     }
     if (!transfer.MaterializeGuest) {
         return true;
-    }
-    // A dependency flush: the guest is stopped.
-    if (version != nullptr) {
-        std::vector<Renderer3ds::PicaPhysicalMemoryWrite> writes;
-        writes.reserve(version->Spans.size());
-        size_t at = 0U;
-        for (const auto& span : version->Spans) {
-            Renderer3ds::PicaPhysicalMemoryWrite write;
-            write.Address = span.DestinationAddress;
-            write.Bytes.assign(version->Bytes.begin() + static_cast<std::ptrdiff_t>(at),
-                               version->Bytes.begin() + static_cast<std::ptrdiff_t>(at + span.ByteCount));
-            writes.push_back(std::move(write));
-            at += span.ByteCount;
-        }
-        if (mPhysicalMemoryCommit && mPhysicalMemoryCommit(writes)) {
-            copies.MarkMaterialized(transfer.CompletionId);
-        } else if (mCounters.PicaTextureCopiesFailed++ < 10U) {
-            Deko3d::Log("texture copy %08x -> %08x: the guest's memory was not written",
-                        transfer.InputPhysicalAddress, transfer.OutputPhysicalAddress);
-        }
     }
     if (!mPhysicalMemoryComplete || !mPhysicalMemoryComplete(transfer.CompletionId)) {
         if (error != nullptr) {
@@ -1047,7 +1087,7 @@ bool GfxRenderingAPIDeko3d::SubmitPicaTextureCopy(const GfxNativePicaDisplayTran
 }
 
 const char* GfxRenderingAPIDeko3d::CapturePicaTextureCopy(const GfxNativePicaDisplayTransferView& transfer,
-                                                          Deko3d::PicaCopyStore::Version& version) {
+                                                          const Deko3d::PicaCopyStore::VersionPtr& version) {
     if (!mDeviceReady) {
         return "no deko3d device";
     }
@@ -1074,21 +1114,63 @@ const char* GfxRenderingAPIDeko3d::CapturePicaTextureCopy(const GfxNativePicaDis
     if (mGrassDraws) {
         DrawGrass(*key, *source, Oot3d::GrassDrawPoint::Transfer);
     }
-    // The read-back waits for everything the frame recorded; the present
-    // thread must not be using the queue then. The mailbox's present thread
-    // has a queue of its own (Device::CreateMailbox), so it is not waited for.
+    // The read-back's submission: the present thread must not be using the
+    // queue then. The mailbox's present thread has a queue of its own
+    // (Device::CreateMailbox), so it is not waited for.
     if (!mDevice.Mailbox()) {
         mDevice.WaitPresentIdle();
     }
     // config/deko3d_flip_y 0: target row 0 holds NDC y +1.
     std::string readError;
-    if (!mTargets.ReadCopyRows(*source, key->Height, mFlipY, mCopyRgba, &readError)) {
+    if (!mTargets.BeginCopyRows(*source, key->Height, mFlipY, &readError)) {
         return "the copy's source could not be read back";
     }
     mBoundTarget = nullptr;
-    version.Spans = std::move(walk.Spans);
-    return Deko3d::EncodePicaRawCopy(mCopyRgba, source->Extent.Width, key->Height, *key, version.Spans,
-                                     version.Bytes);
+    version->Spans = std::move(walk.Spans);
+    version->Pending = true;
+    mPendingCopy = version;
+    mPendingCopyId = transfer.CompletionId;
+    mPendingCopyKey = *key;
+    if (mCounters.PicaTextureCopies++ == 0U) {
+        Deko3d::Log("pica: first texture copy (%u bytes in %zu spans, %08x -> %08x, read-back submitted)",
+                    transfer.TextureCopyBytes, version->Spans.size(), transfer.InputPhysicalAddress,
+                    transfer.OutputPhysicalAddress);
+    }
+    return nullptr;
+}
+
+void GfxRenderingAPIDeko3d::ResolvePicaTextureCopy() {
+    if (mPendingCopy == nullptr) {
+        return;
+    }
+    const Deko3d::PicaCopyStore::VersionPtr version = std::move(mPendingCopy);
+    mPendingCopy = nullptr;
+    version->Pending = false;
+    const auto started = std::chrono::steady_clock::now();
+    if (!mTargets.CopyRowsDone() && mDevice.FrameOpen()) {
+        // The GPU has not reached the read-back yet: what the frame recorded
+        // since goes to it now, so it keeps drawing while the CPU waits.
+        mDevice.Submit();
+        mBoundTarget = nullptr;
+    }
+    std::string readError;
+    uint32_t width = 0U;
+    const bool read = mTargets.FinishCopyRows(mCopyRgba, width, &readError);
+    const auto waited = std::chrono::steady_clock::now();
+    const char* failure =
+        read ? Deko3d::EncodePicaRawCopy(mCopyRgba, width, mPendingCopyKey.Height, mPendingCopyKey, version->Spans,
+                                         version->Bytes)
+             : "the copy's source could not be read back";
+    mCounters.PicaTextureCopyWaitMilliseconds += std::chrono::duration<double, std::milli>(waited - started).count();
+    mCounters.PicaTextureCopyEncodeMilliseconds +=
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waited).count();
+    if (failure != nullptr) {
+        version->Bytes.clear();
+        if (mCounters.PicaTextureCopiesFailed++ < 10U) {
+            Deko3d::Log("texture copy %llu not read back: %s%s%s", static_cast<unsigned long long>(mPendingCopyId),
+                        failure, read ? "" : ": ", read ? "" : readError.c_str());
+        }
+    }
 }
 
 bool GfxRenderingAPIDeko3d::SetPinnedPicaTextureCopies(std::span<const Renderer3ds::PicaTextureCopyReference> copies,
@@ -1243,6 +1325,8 @@ bool GfxRenderingAPIDeko3d::ResetPicaState(std::string*) {
         mDevice.Submit();
     }
     mDevice.WaitIdle();
+    // The copy still reading back keeps its bytes; its staging goes.
+    ResolvePicaTextureCopy();
     mTargets.Reset();
     mPendingFills.clear();
     mBoundTarget = nullptr;
@@ -1344,6 +1428,7 @@ bool GfxRenderingAPIDeko3d::RestorePicaColorTargets(
         // the GPU finished what was recorded for them (as ResetPicaState).
         mDevice.Submit();
         mDevice.WaitIdle();
+        ResolvePicaTextureCopy();
         mTargets.Reset();
         mBoundTarget = nullptr;
         if (error != nullptr) {

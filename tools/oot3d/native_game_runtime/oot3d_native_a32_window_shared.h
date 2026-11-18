@@ -638,14 +638,17 @@ Oot3dNativeGame::NativeA32InputFrame ResolveNativeA32GuestInput(
     Oot3dNativeGame::NativeA32PolledButtonLatch &startButtonLatch,
     Oot3dNativeGame::TopScreenStartRoutingState &startRoutingState);
 
+// TopScreen: a native frontend, a pause page, or the drawn Game Over choices
+// (TopScreenGameOverChoicesPresented on the dispatcher's route state).
 bool ResolveNativeA32TouchInputEnabled(
     Oot3dNativeGame::NativeA32Memory &memory,
     const Oot3dNativeGame::Oot3dNativeUiLifecycleBridge &uiLifecycleBridge,
-    bool topScreenUiProfile);
+    const NativeCandidateDispatchState &dispatch);
 
 // The default profile's lower screen, or the TopScreen page on the top
-// screen: the widened Items page while Items is open (the predicate the
-// wide-page draw uses, ReadTopScreenWidePageState), else a centred page.
+// screen: the widened Items page while Items is open, the widened dungeon Map
+// while it is open (the predicates the wide-page draw uses,
+// ReadTopScreenWidePageState), else a centred page.
 Oot3dNativeGame::NativeA32TouchPresentation ResolveNativeA32TouchPresentation(
     Oot3dNativeGame::NativeA32Memory &memory, bool topScreenUiProfile);
 

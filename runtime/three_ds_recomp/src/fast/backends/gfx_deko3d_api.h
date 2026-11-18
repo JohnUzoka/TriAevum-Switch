@@ -77,8 +77,11 @@ struct Deko3dBackendCounters {
     uint64_t PicaTextureCopies = 0;       // raw copies out of a GPU target, captured (gfx_deko3d_pica_copies.h)
     uint64_t PicaTextureCopiesReused = 0; // a replay of a captured copy
     uint64_t PicaTextureCopiesFailed = 0; // completed without bytes (logged)
-    double PicaTextureCopyMilliseconds = 0.0;    // the captures' time, summed
+    uint64_t PicaTextureCopiesDeferred = 0; // the guest's bytes deferred to its first read (PhysicalMemoryDefer)
+    double PicaTextureCopyMilliseconds = 0.0;    // the captures' time (the guest waits for it), summed
     double PicaTextureCopyMaxMilliseconds = 0.0; // the longest capture
+    double PicaTextureCopyWaitMilliseconds = 0.0;   // ResolvePicaTextureCopy: the GPU reaching the read-back, rows out
+    double PicaTextureCopyEncodeMilliseconds = 0.0; // ResolvePicaTextureCopy: the rows encoded, summed
     uint64_t PicaScanouts = 0;
     uint64_t PicaFills = 0;
     uint64_t PicaClears = 0;
@@ -521,10 +524,18 @@ class GfxRenderingAPIDeko3d final : public GfxRenderingAPI, public Renderer3ds::
     static void DrawPlayerShadowMesh(DkCmdBuf cmd, const PlayerShadowDraw& draw);
     // SubmitPicaDisplayTransfer of a raw TextureCopy (TextureCopyBytes != 0).
     bool SubmitPicaTextureCopy(const GfxNativePicaDisplayTransferView& transfer, std::string* error);
-    // The copy's destination bytes, or why it has none.
+    // Submits the copy's source read-back into `version` (left Pending, as
+    // mPendingCopy), or says why it has none.
     const char* CapturePicaTextureCopy(const GfxNativePicaDisplayTransferView& transfer,
-                                       Deko3d::PicaCopyStore::Version& version);
+                                       const Deko3d::PicaCopyStore::VersionPtr& version);
+    // Takes mPendingCopy's read-back (waiting for the GPU, with the work the
+    // frame recorded since handed to it first) and encodes its bytes; on a
+    // failure (logged) the version keeps none. Nothing without one.
+    void ResolvePicaTextureCopy();
     std::vector<uint8_t> mCopyRgba;    // a raw copy's source rows read back
+    Deko3d::PicaCopyStore::VersionPtr mPendingCopy; // the copy whose read-back is outstanding
+    uint64_t mPendingCopyId = 0;                    // its CompletionId
+    Deko3d::PicaTargetKey mPendingCopyKey{};        // its source target
 };
 
 namespace Deko3d {

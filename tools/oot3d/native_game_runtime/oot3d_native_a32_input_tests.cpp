@@ -1,5 +1,6 @@
 #include "oot3d_native_a32_input.h"
 #include "oot3d_top_screen_hud_touch.h"
+#include "oot3d_top_screen_mod_profile.h"
 #include "oot3d_top_screen_page_layout.h"
 
 #include "fast/backends/gfx_deko3d_pica_pipeline.h"
@@ -7,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -14,6 +16,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -228,18 +231,19 @@ void TestSwitchPageTouchLandsOnTheTappedElement() {
             Fail("a tap on a centred page did not land where it is drawn");
         }
     }
-    // The wide dungeon Map and System use the page offset 0.8: centred.
+    // System uses the wide page offset 0.8 and is drawn centred.
     const PageDraw widePage{0.0F, 400.0F, kTopScreenWidePageScale, kTopScreenWidePageOffset};
     for (const float pageX : {20.0F, 160.0F, 300.0F}) {
         const auto screen = SwitchScreenPoint(widePage, pageX, 120.0F);
         const auto touch = MapHostPointerToNativeA32Touch(screen.X, screen.Y, 1280U, 720U, true,
                                                           NativeA32TouchPresentation::TopScreenCentredPage);
         Require(touch.Inside && std::abs(touch.X - pageX) <= 1.0F,
-                "a tap on the wide dungeon Map or System did not land where it is drawn");
+                "a tap on System did not land where it is drawn");
     }
     // Forward and inverse layouts agree, and the gap between the Items
     // grid's region and its sixth column maps between them.
-    for (const auto layout : {TopScreenPageLayout::Centred, TopScreenPageLayout::WideItems}) {
+    for (const auto layout : {TopScreenPageLayout::Centred, TopScreenPageLayout::WideItems,
+                              TopScreenPageLayout::WideDungeonMap}) {
         for (float pageX = 0.0F; pageX < 320.0F; pageX += 1.0F) {
             Require(std::abs(TopScreenPresentedToPageX(TopScreenPageToPresentedX(pageX, layout), layout) - pageX) <
                         1.0e-3F,
@@ -250,19 +254,110 @@ void TestSwitchPageTouchLandsOnTheTappedElement() {
             "the widened Items gap left the gap");
 }
 
+// Issue 20 (0.2.8-test.2): in a dungeon the Map page ignored every tap until
+// L or R changed the page. The 3DS mod hid the dungeon Map's touch (it is not
+// on the 3DS touch screen there) and moves its side columns 40 pixels
+// outwards; the native touch rectangles stay where the lower screen had them.
+void TestSwitchDungeonMapTapLandsOnTheDrawnColumns() {
+    // The column moves this port draws (TopScreenVerifiedLayoutPatches).
+    const auto patchedX = [](std::string_view semantic, float* native, float* drawn) {
+        for (const auto& patch : TopScreenVerifiedLayoutPatches()) {
+            if (patch.Semantic == semantic) {
+                *native = std::bit_cast<float>(patch.Expected[0]);
+                *drawn = std::bit_cast<float>(patch.Replacement[0]);
+                return;
+            }
+        }
+        Fail("a dungeon Map layout contract is missing");
+    };
+    float native = 0.0F, drawn = 0.0F;
+    patchedX("dungeon_map_left_column_x", &native, &drawn);
+    Require(native - drawn == kTopScreenWideDungeonMapColumnShift,
+            "the touch layout's left column shift is not the drawn one");
+    patchedX("dungeon_map_right_column_x", &native, &drawn);
+    Require(native == kTopScreenWideDungeonMapRightColumnStart &&
+                drawn - native == kTopScreenWideDungeonMapColumnShift,
+            "the touch layout's right column is not the drawn one");
+    patchedX("dungeon_map_floor_outer_0_x", &native, &drawn);
+    Require(drawn - native == kTopScreenWideDungeonMapColumnShift,
+            "the floor buttons do not move with the right column");
+    patchedX("dungeon_map_panel_x", &native, &drawn);
+    Require(native == kTopScreenWideDungeonMapLeftColumnEnd,
+            "the touch layout's left column does not end at the panel");
+
+    // PauseDungeonMap_UpdateTouchSelection (0x004435B0) hit-tests, inclusive
+    // of both edges (0x0033F428): the Map, Compass and Boss Key at X 10..52
+    // (Y 12, 62, 122; 42 high), drawn 40 left (icon R2 10 -> -30), and the
+    // five floors at X 264..316 (Y 8 + 46 n; 40 high), drawn 40 right.
+    struct Rect {
+        float X, Y, W, H, DrawnShift;
+    };
+    std::vector<Rect> targets;
+    for (const float y : {12.0F, 62.0F, 122.0F})
+        targets.push_back({10.0F, y, 42.0F, 42.0F, -kTopScreenWideDungeonMapColumnShift});
+    for (float y = 8.0F; y <= 192.0F; y += 46.0F)
+        targets.push_back({264.0F, y, 52.0F, 40.0F, kTopScreenWideDungeonMapColumnShift});
+    const auto inside = [](const Rect& rect, const NativeA32TouchMapping& touch) {
+        return touch.X >= rect.X && touch.X <= rect.X + rect.W && touch.Y >= rect.Y &&
+               touch.Y <= rect.Y + rect.H;
+    };
+    const PageDraw dungeonMap{0.0F, 400.0F, kTopScreenWidePageScale, kTopScreenWidePageOffset};
+    for (const auto& target : targets) {
+        const float centreX = target.X + target.W * 0.5F;
+        const float centreY = target.Y + target.H * 0.5F;
+        const auto screen = SwitchScreenPoint(dungeonMap, centreX + target.DrawnShift, centreY);
+        const auto touch = MapHostPointerToNativeA32Touch(
+            screen.X, screen.Y, 1280U, 720U, true, NativeA32TouchPresentation::TopScreenWideDungeonMapPage);
+        if (!(touch.Inside && inside(target, touch) && std::abs(touch.X - centreX) <= 1.0F)) {
+            std::cerr << "dungeon Map target " << target.X << ',' << target.Y << " drawn at screen " << screen.X
+                      << ',' << screen.Y << " -> touch " << touch.X << ',' << touch.Y << '\n';
+            Fail("a tap on a dungeon Map item or floor did not land on it");
+        }
+    }
+    // The widened panel next to each column (where the centred page had the
+    // columns) and the page tabs keep the panel's touch: no item or floor.
+    for (const float pageX : {30.0F, 50.0F, 270.0F, 290.0F}) {
+        for (const auto& target : targets) {
+            const auto screen = SwitchScreenPoint(dungeonMap, pageX, target.Y + target.H * 0.5F);
+            const auto touch = MapHostPointerToNativeA32Touch(
+                screen.X, screen.Y, 1280U, 720U, true, NativeA32TouchPresentation::TopScreenWideDungeonMapPage);
+            for (const auto& other : targets)
+                Require(!inside(other, touch), "a tap on the dungeon Map panel selected an item or a floor");
+        }
+    }
+    for (const float tabX : {96.0F, 160.0F, 224.0F}) {
+        const auto screen = SwitchScreenPoint(dungeonMap, tabX, 221.0F);
+        const auto touch = MapHostPointerToNativeA32Touch(
+            screen.X, screen.Y, 1280U, 720U, true, NativeA32TouchPresentation::TopScreenWideDungeonMapPage);
+        Require(touch.Inside && std::abs(touch.X - tabX) <= 1.0F, "a dungeon Map page tab moved");
+    }
+}
+
 // Host input is published at the CTR's 60 Hz refresh rate, but the native
 // pause controller updates every other refresh. Drive the real touch tracker
 // and pointer mapper from the renderer's page placement for both update phases.
 void TestQuickSwitchMapTapReachesEitherUpdatePhase() {
-    constexpr PageDraw pages[]{
-        {40.0F, 320.0F, -1.0F / 160.0F, 1.0F}, // World Map
-        {0.0F, 400.0F, kTopScreenWidePageScale, kTopScreenWidePageOffset}, // Dungeon Map
+    struct MapPage {
+        PageDraw Draw;
+        TopScreenPageLayout Layout;
+        NativeA32TouchPresentation Presentation;
     };
+    constexpr MapPage pages[]{
+        {{40.0F, 320.0F, -1.0F / 160.0F, 1.0F}, TopScreenPageLayout::Centred,
+         NativeA32TouchPresentation::TopScreenCentredPage}, // World Map
+        {{0.0F, 400.0F, kTopScreenWidePageScale, kTopScreenWidePageOffset}, TopScreenPageLayout::WideDungeonMap,
+         NativeA32TouchPresentation::TopScreenWideDungeonMapPage}, // Dungeon Map
+    };
+    // A left-column item, the panel, a floor, and the Map tab.
     constexpr ScreenPoint points[]{{20, 120}, {160, 120}, {300, 120}, {160, 221}};
     const TopScreenTouchPollContext pageContext{true, false, nullptr, 1280U, 720U, true};
     for (const auto& page : pages) {
         for (const auto& point : points) {
-            const auto screen = SwitchScreenPoint(page, point.X, point.Y);
+            // Where the page draws the element at native X (both pages put
+            // page X 0 at top-screen X 40).
+            const float drawnX = TopScreenPageToPresentedX(static_cast<float>(point.X), page.Layout) -
+                                 static_cast<float>(kTopScreenCentredPageX);
+            const auto screen = SwitchScreenPoint(page.Draw, drawnX, static_cast<float>(point.Y));
             for (unsigned updatePhase = 0U; updatePhase < 2U; ++updatePhase) {
                 TopScreenTouchTracker tracker;
                 const std::array contact{TopScreenTouchContact{
@@ -279,7 +374,7 @@ void TestQuickSwitchMapTapReachesEitherUpdatePhase() {
                     const auto touch = MapHostPointerToNativeA32Touch(
                         static_cast<int32_t>(result.PageX * 1280.0F),
                         static_cast<int32_t>(result.PageY * 720.0F), 1280U, 720U,
-                        result.PagePressed, NativeA32TouchPresentation::TopScreenCentredPage);
+                        result.PagePressed, page.Presentation);
                     Require(touch.Pressed == (refresh < 2U),
                             "a quick map tap did not span exactly two guest refreshes");
                     Require(result.HudButtons == 0U && result.AimDeltaX == 0.0F &&
@@ -308,6 +403,7 @@ int main(int argc, char** argv) {
     Require(argc == 1, "usage: [--emit-mouse-aim FILE pitch|yaw]");
     TestShoulderMappings();
     TestSwitchPageTouchLandsOnTheTappedElement();
+    TestSwitchDungeonMapTapLandsOnTheDrawnColumns();
     TestQuickSwitchMapTapReachesEitherUpdatePhase();
     const auto mousePreset = NativeControlPreset(NativeControlProfile::KeyboardMouse);
     const auto controllerPreset = NativeControlPreset(NativeControlProfile::Controller);

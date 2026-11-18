@@ -91,10 +91,12 @@ using NativeA32TouchMapping = ThreeDsRecomp::Input::TouchMapping;
 // oot3d_top_screen_page_layout.h describes.
 enum class NativeA32TouchPresentation : uint8_t {
     NativeLowerScreen320x240,
-    // Centred pages, the frontend menus, the wide dungeon Map and System.
+    // Centred pages, the frontend menus and System.
     TopScreenCentredPage,
     // The widened Items page (grid at X + 63, sixth column at X + 80).
     TopScreenWideItemsPage,
+    // The widened dungeon Map (left column at X + 0, right column at X + 80).
+    TopScreenWideDungeonMapPage,
 };
 
 enum class NativeA32TopScreenPage : uint8_t {
@@ -157,8 +159,9 @@ void MarkTopScreenStartCloseGestureConsumed(
 void ReleaseTopScreenStartRoutingLatch(
     bool physicalStartHeld, TopScreenStartRoutingState& state) noexcept;
 
-// TopScreen keeps pointer ownership only for actual pause pages and native
-// frontends. The broad OoT3D touch-presentation flag is still authoritative
+// TopScreen keeps pointer ownership only for actual pause pages, the drawn
+// Game Over choices (TopScreenNativeTouchPageActive) and native frontends.
+// The broad OoT3D touch-presentation flag is still authoritative
 // for the unchanged default two-screen profile.
 bool ResolveNativeA32TouchInputEnabled(
     bool topScreenProfile, bool nativeTouchPresentationActive,

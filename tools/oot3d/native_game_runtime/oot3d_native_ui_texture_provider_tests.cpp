@@ -646,6 +646,82 @@ int main() {
         ++revision;
         Require(songProvider.Revision() == (revision << 2U | 2U), "pack revision still invalidates song art");
     }
+
+    // The song list's own R (issue 20): its middle bar and leg cross the stem
+    // in half of the rows the stroke is measured on. The ZR cell's Z must be
+    // as thin as the ZL cell's, not a solid dark block in front of the R.
+    for (const std::uint32_t scale : {1U, 3U}) {
+        const auto width = 512U * scale, height = 256U * scale;
+        auto art = std::make_shared<std::vector<std::uint8_t>>(width * height * 4U, 0);
+        const auto fill = [&](std::uint32_t cellX, unsigned x0, unsigned y0, unsigned x1, unsigned y1) {
+            for (auto y = (160U + y0) * scale; y < (160U + y1) * scale; ++y) {
+                for (auto x = (cellX + x0) * scale; x < (cellX + x1) * scale; ++x) {
+                    const auto pixel = (y * width + x) * 4U;
+                    (*art)[pixel] = (*art)[pixel + 1] = (*art)[pixel + 2] = 24;
+                    (*art)[pixel + 3] = 255;
+                }
+            }
+        };
+        for (const auto x : {208U, 224U}) {
+            for (auto y = 161U * scale; y < 175U * scale; ++y) {
+                for (auto px = (x + 1U) * scale; px < (x + 15U) * scale; ++px) {
+                    const auto pixel = (y * width + px) * 4U;
+                    const bool plate = y >= 162U * scale && y < 174U * scale && px >= (x + 2U) * scale &&
+                                       px < (x + 14U) * scale;
+                    (*art)[pixel] = (*art)[pixel + 1] = (*art)[pixel + 2] = plate ? 200 : 40;
+                    (*art)[pixel + 3] = 255;
+                }
+            }
+            fill(x, 5, 3, 6, 11); // stem
+        }
+        fill(208, 5, 10, 11, 11); // L foot
+        fill(224, 5, 3, 10, 4);   // R top, bowl, bar
+        fill(224, 10, 4, 11, 6);
+        fill(224, 5, 6, 10, 7);
+        fill(224, 6, 7, 8, 8);    // R leg
+        fill(224, 8, 8, 9, 9);
+        fill(224, 9, 9, 10, 10);
+        fill(224, 10, 10, 11, 11);
+        Oot3dNativeA32UiTextureProvider songProvider(picaMemory);
+        songProvider.SetCustomTextureSource({
+            [&](const Oot3dNativeUiCustomTextureRequest&) {
+                Oot3dNativeUiCustomTexture custom;
+                custom.state = Oot3dNativeUiCustomTexture::State::Ready;
+                custom.width = width;
+                custom.height = height;
+                custom.rgba8 = art;
+                return custom;
+            }, [] { return std::uint64_t{1}; }});
+        Fast::Oot3d::SetMessageShoulderGlyphs(Fast::Oot3d::kMessageGlyphZl | Fast::Oot3d::kMessageGlyphZr);
+        Require(songProvider.Resolve(songAtlas, pixels, &error), "song atlas resolve (R stroke)");
+        const auto output = pixels.Data();
+        const auto luma = [&](std::uint32_t cellX, std::uint32_t x, std::uint32_t y) {
+            const auto pixel = ((160U * scale + y) * width + cellX * scale + x) * 4U;
+            Require(output[pixel + 3] == 255, "song plate lost opacity");
+            return (77U * output[pixel] + 150U * output[pixel + 1] + 29U * output[pixel + 2]) / 256U;
+        };
+        // The Z: plate columns 2..6, letter rows 3..10. Between its bars the
+        // old block left no plate showing in columns 3..6.
+        std::array<unsigned, 2> dark{};
+        for (std::uint32_t y = 3U * scale; y < 11U * scale; ++y) {
+            std::array<unsigned, 2> light{};
+            for (std::uint32_t x = 2U * scale; x < 7U * scale; ++x) {
+                for (const auto cell : {0U, 1U}) {
+                    const auto value = luma(208U + 16U * cell, x, y);
+                    dark[cell] += value < 100U ? 1U : 0U;
+                    light[cell] += value >= 160U && x >= 3U * scale ? 1U : 0U;
+                }
+            }
+            if (y >= 5U * scale && y < 9U * scale) {
+                Require(light[0] != 0U && light[1] != 0U, "a song ZL/ZR Z is filled into a dark block");
+            }
+        }
+        Require(dark[0] != 0U && dark[1] <= dark[0] + scale, "song ZR's Z is heavier than ZL's");
+        Fast::Oot3d::SetMessageShoulderGlyphs(0);
+        Require(songProvider.Resolve(songAtlas, pixels, &error) && pixels.Data().size() == art->size() &&
+                    std::equal(art->begin(), art->end(), pixels.Data().begin()),
+                "swapped bindings must show the song art's own L/R");
+    }
     Fast::Oot3d::SetMessageShoulderGlyphs(0);
 
     std::cout << "oot3d_native_ui_texture_provider_tests: ok\n";

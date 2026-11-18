@@ -165,6 +165,9 @@ inline bool RewriteShoulderCell(const uint8_t* src, uint8_t* dst, size_t stride,
     const float letterWidth = static_cast<float>(bx1 - bx0);
     const float letterHeight = static_cast<float>(by1 - by0);
     // Stroke width: the left stem (L and R both have one), middle half rows.
+    // Rows where R's bar or leg meets the stem only lengthen the run, so the
+    // stem is the low end: take the lower quartile, not the median (the
+    // song list's R has its bar and leg in half of those rows).
     std::vector<float> stems;
     for (int y = by0 + (by1 - by0) / 4; y < by1 - (by1 - by0) / 4; ++y) {
         float run = coverAt(bx0 - 1, y);
@@ -176,8 +179,9 @@ inline bool RewriteShoulderCell(const uint8_t* src, uint8_t* dst, size_t stride,
     if (stems.empty()) {
         return false;
     }
-    std::nth_element(stems.begin(), stems.begin() + static_cast<std::ptrdiff_t>(stems.size() / 2U), stems.end());
-    const float stroke = std::max(1.0F, stems[stems.size() / 2U]);
+    const auto stem = stems.begin() + static_cast<std::ptrdiff_t>((stems.size() - 1U) / 4U);
+    std::nth_element(stems.begin(), stem, stems.end());
+    const float stroke = std::max(1.0F, *stem);
     // The ink: the letter's solid pixels.
     std::array<float, 3> inkColor{};
     float inkCount = 0.0F;

@@ -51,8 +51,8 @@ inline constexpr float kTopScreenWideItemsCursorOffset = 0.685F; // 0x3F2F5C29
 // One page pixel per presented pixel, as on the centred page.
 static_assert(kTopScreenWidePageScale * kTopScreenPresentedWidth * 0.5F > -1.0001F &&
               kTopScreenWidePageScale * kTopScreenPresentedWidth * 0.5F < -0.9999F);
-// The page offset reproduces the centred page (X + 40); dungeon Map and
-// System therefore keep the centred layout.
+// The page offset reproduces the centred page (X + 40): System keeps the
+// centred layout, and so does the dungeon Map between its moved columns.
 static_assert(TopScreenWidePageX(kTopScreenWidePageOffset) >
                   kTopScreenCentredPageX - 0.001F &&
               TopScreenWidePageX(kTopScreenWidePageOffset) <
@@ -73,20 +73,41 @@ static_assert(TopScreenWidePageX(kTopScreenWideItemsOffset) +
               TopScreenWidePageX(kTopScreenWideItemsOffset) +
                       kTopScreenWideItemsGridShift <
                   TopScreenWidePageX(kTopScreenWideItemsCursorOffset) + 0.001F);
+// The widened dungeon Map keeps the page offset 0.8 (X + 40), and the verified
+// 2.1.1 layout contracts (TopScreenVerifiedLayoutPatches) move its two side
+// columns 40 pixels outwards: the left column (Map, Compass and Boss Key, their
+// icon producers' R2 10 -> -30, column X 0 -> -40) to top-screen X 0, and the
+// floor column (column X 256 -> 296, floor buttons 262 -> 302) to the right
+// edge. Their native touch rectangles (PauseDungeonMap_UpdateTouchSelection,
+// 0x004435B0: items X 10..52, floors X 264..316) do not move. Between the
+// columns (the widened panel, the page tabs) the page stays at X + 40.
+inline constexpr float kTopScreenWideDungeonMapLeftColumnEnd = 56.0F;
+inline constexpr float kTopScreenWideDungeonMapRightColumnStart = 256.0F;
+inline constexpr float kTopScreenWideDungeonMapColumnShift = 40.0F;
 
 enum class TopScreenPageLayout : std::uint8_t {
-  // Centred pages, the relocated frontend menus, and the wide dungeon Map and
-  // System (whose offset 0.8 is the centred placement).
+  // Centred pages, the relocated frontend menus, and System (whose wide
+  // offset 0.8 is the centred placement).
   Centred,
   // The widened Items page.
   WideItems,
+  // The widened dungeon Map.
+  WideDungeonMap,
 };
 
 // Top-screen X of the interactive content at page (touch) X.
 [[nodiscard]] constexpr float TopScreenPageToPresentedX(
     float pageX, TopScreenPageLayout layout) noexcept {
+  const float centred = static_cast<float>(kTopScreenCentredPageX) + pageX;
   if (layout == TopScreenPageLayout::Centred)
-    return static_cast<float>(kTopScreenCentredPageX) + pageX;
+    return centred;
+  if (layout == TopScreenPageLayout::WideDungeonMap) {
+    if (pageX < kTopScreenWideDungeonMapLeftColumnEnd)
+      return centred - kTopScreenWideDungeonMapColumnShift;
+    return pageX < kTopScreenWideDungeonMapRightColumnStart
+               ? centred
+               : centred + kTopScreenWideDungeonMapColumnShift;
+  }
   const float items = TopScreenWidePageX(kTopScreenWideItemsOffset);
   return pageX < kTopScreenWideItemsLeftRegionEnd
              ? items + kTopScreenWideItemsGridShift + pageX
@@ -95,11 +116,28 @@ enum class TopScreenPageLayout : std::uint8_t {
 
 // The inverse: the page (touch) X under a top-screen X. On the widened Items
 // page a point between the grid's region and the sixth column (top-screen X
-// 319..336, where neither is drawn) maps to X 256, between them as well.
+// 319..336, where neither is drawn) maps to X 256, between them as well. On
+// the widened dungeon Map a point on the panel next to a column (where the
+// centred page had that column) stays on the panel's side of it, so it never
+// selects an item or a floor that is drawn elsewhere.
 [[nodiscard]] constexpr float TopScreenPresentedToPageX(
     float presentedX, TopScreenPageLayout layout) noexcept {
+  const float centred = presentedX - static_cast<float>(kTopScreenCentredPageX);
   if (layout == TopScreenPageLayout::Centred)
-    return presentedX - static_cast<float>(kTopScreenCentredPageX);
+    return centred;
+  if (layout == TopScreenPageLayout::WideDungeonMap) {
+    if (centred < kTopScreenWideDungeonMapLeftColumnEnd -
+                      kTopScreenWideDungeonMapColumnShift)
+      return centred + kTopScreenWideDungeonMapColumnShift;
+    if (centred >= kTopScreenWideDungeonMapRightColumnStart +
+                       kTopScreenWideDungeonMapColumnShift)
+      return centred - kTopScreenWideDungeonMapColumnShift;
+    return centred < kTopScreenWideDungeonMapLeftColumnEnd
+               ? kTopScreenWideDungeonMapLeftColumnEnd
+           : centred < kTopScreenWideDungeonMapRightColumnStart
+               ? centred
+               : kTopScreenWideDungeonMapRightColumnStart - 1.0F;
+  }
   const float items = TopScreenWidePageX(kTopScreenWideItemsOffset);
   const float grid = presentedX - (items + kTopScreenWideItemsGridShift);
   if (grid < kTopScreenWideItemsLeftRegionEnd)

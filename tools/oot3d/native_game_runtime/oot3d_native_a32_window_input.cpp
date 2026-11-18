@@ -602,21 +602,24 @@ Oot3dNativeGame::NativeA32InputFrame ResolveNativeA32GuestInput(
 bool ResolveNativeA32TouchInputEnabled(
     Oot3dNativeGame::NativeA32Memory &memory,
     const Oot3dNativeGame::Oot3dNativeUiLifecycleBridge &uiLifecycleBridge,
-    bool topScreenUiProfile) {
-  bool nativePausePageActive = false;
-  if (topScreenUiProfile) {
+    const NativeCandidateDispatchState &dispatch) {
+  bool nativePageActive = false;
+  if (dispatch.TopScreenUiProfile) {
     Oot3dNativeGame::TopScreenPauseDrawInputs pauseInputs;
-    nativePausePageActive =
+    nativePageActive =
         Oot3dNativeGame::ReadTopScreenPauseDrawInputs(memory, &pauseInputs) &&
-        pauseInputs.AnyPageGateActive;
+        Oot3dNativeGame::TopScreenNativeTouchPageActive(
+            pauseInputs,
+            dispatch.TopScreenTouchCoordinateRoute.RuntimeSceneLatch,
+            dispatch.TopScreenRendererVisibilityRoute);
   }
   return Oot3dNativeGame::ResolveNativeA32TouchInputEnabled(
-      topScreenUiProfile,
+      dispatch.TopScreenUiProfile,
       uiLifecycleBridge.NativeTouchPresentationActive(),
       // A touch on the title also reveals the withheld version choice.
       uiLifecycleBridge.NativeFrontendPresentationActive() ||
           uiLifecycleBridge.NativeVersionChoiceAwaitingReveal(),
-      nativePausePageActive);
+      nativePageActive);
 }
 
 Oot3dNativeGame::NativeA32TouchPresentation ResolveNativeA32TouchPresentation(
@@ -625,10 +628,14 @@ Oot3dNativeGame::NativeA32TouchPresentation ResolveNativeA32TouchPresentation(
   if (!topScreenUiProfile) {
     return NativeA32TouchPresentation::NativeLowerScreen320x240;
   }
+  // A failed read leaves every page flag false: the centred page.
   Oot3dNativeGame::TopScreenWidePageState page;
   return Oot3dNativeGame::ReadTopScreenWidePageState(memory, &page) &&
                  page.ItemsActive
              ? NativeA32TouchPresentation::TopScreenWideItemsPage
+         // The System page (drawn centred) owns touch while it is open.
+         : page.DungeonMapActive && !page.SystemActive
+             ? NativeA32TouchPresentation::TopScreenWideDungeonMapPage
              : NativeA32TouchPresentation::TopScreenCentredPage;
 }
 

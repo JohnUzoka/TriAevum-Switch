@@ -1101,7 +1101,7 @@ bool NativeA32WindowSession::RunFrame() {
   quickLoadKeyWasDown = quickLoadKeyDown;
   bool nativeFrontendTouchEnabled = ResolveNativeA32TouchInputEnabled(
       process.Memory(), uiLifecycleBridge,
-      nativeCandidateDispatch.TopScreenUiProfile);
+      nativeCandidateDispatch);
   uint32_t topScreenNativeGameMode = UINT32_MAX;
   const bool topScreenGameplayInputMode =
       process.Memory().Read32(kNativeGameMode, &topScreenNativeGameMode) &&
@@ -2812,7 +2812,7 @@ bool NativeA32WindowSession::SampleGuestRefreshInput(
   if (guestRefreshIndex != 0U) {
     nativeFrontendTouchEnabled = ResolveNativeA32TouchInputEnabled(
         process.Memory(), uiLifecycleBridge,
-        nativeCandidateDispatch.TopScreenUiProfile);
+        nativeCandidateDispatch);
     topScreenNativeGameMode = UINT32_MAX;
     const bool refreshedTopScreenGameplayInputMode =
         process.Memory().Read32(kNativeGameMode,

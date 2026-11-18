@@ -368,6 +368,8 @@ NativeA32TouchMapping MapHostPointerToNativeA32Touch(
     const auto layout =
         presentation == NativeA32TouchPresentation::TopScreenWideItemsPage
             ? TopScreenPageLayout::WideItems
+        : presentation == NativeA32TouchPresentation::TopScreenWideDungeonMapPage
+            ? TopScreenPageLayout::WideDungeonMap
             : TopScreenPageLayout::Centred;
     return ThreeDsRecomp::Input::MapPresentationPointToTouch(
         TopScreenPresentedToPageX(topScreen.X, layout), topScreen.Y,

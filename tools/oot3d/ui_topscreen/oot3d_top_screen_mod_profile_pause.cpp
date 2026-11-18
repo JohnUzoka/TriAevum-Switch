@@ -290,13 +290,13 @@ std::uint32_t ResolveTopScreenPauseRoutedCommand(std::uint32_t nativeCommand,
 
 bool ResolveTopScreenTouchCoordinateSuppression(
     const TopScreenPauseDrawInputs &inputs, bool routeActive,
-    bool pauseCameraControlActive, bool secondaryLayerActive,
+    bool gameOverChoicesPresented,
     TopScreenTouchCoordinateRouteState *state) noexcept {
   if (state == nullptr)
     return false;
 
-  // Exact source equivalent of payload helper 0x005C8E0C. Mode 3 preserves
-  // the previous value; every other inactive scene clears it.
+  // Payload helper 0x005C8E0C. Mode 3 preserves the previous latch value;
+  // every other inactive scene clears it.
   if (inputs.NativeTransitionActive) {
     state->RuntimeSceneLatch = true;
   } else if (!inputs.HasScene || inputs.SceneMode != 3U) {
@@ -304,12 +304,15 @@ bool ResolveTopScreenTouchCoordinateSuppression(
   }
 
   const bool sceneRuntimeRoute = IsTopScreenTitleDemoRuntime(inputs);
+  // The Game Over phases: suppressed while the choices are not yet drawn.
   const bool sequenceRoute =
       !state->RuntimeSceneLatch && !inputs.NativeTransitionActive &&
       inputs.HasScene && inputs.SceneMode == 3U && inputs.SceneVariant == 2U &&
-      inputs.SceneSequence >= 3U && inputs.SceneSequence <= 6U;
-  return routeActive || sceneRuntimeRoute || sequenceRoute ||
-         (pauseCameraControlActive && secondaryLayerActive);
+      inputs.SceneSequence >= 3U && inputs.SceneSequence <= 6U &&
+      !gameOverChoicesPresented;
+  // The payload's last clause, Map page 0x00506CE8 with the in-dungeon layer
+  // 0x004FDABC == 1 (the dungeon Map), is not ported: see the declaration.
+  return routeActive || sceneRuntimeRoute || sequenceRoute;
 }
 
 bool ApplyTopScreenTouchCoordinateSuppression(NativeA32Memory &memory,
@@ -573,6 +576,21 @@ bool PrepareTopScreenGameOverDraw(
   // observes the upper native draw itself, not the mod's suppressed callsite.
   return ResolveTopScreenRendererVisibilityRoute(memory, visibility, state,
                                                   &action, error);
+}
+
+bool TopScreenGameOverChoicesPresented(
+    const TopScreenPauseDrawInputs &inputs, bool runtimeSceneLatch,
+    const TopScreenRendererVisibilityRouteState &route) noexcept {
+  return IsTopScreenGameOverPresentation(inputs) && !runtimeSceneLatch &&
+         !IsTopScreenTitleDemoRuntime(inputs) && route.FadeStep >= 24;
+}
+
+bool TopScreenNativeTouchPageActive(
+    const TopScreenPauseDrawInputs &inputs, bool runtimeSceneLatch,
+    const TopScreenRendererVisibilityRouteState &gameOverRoute) noexcept {
+  return inputs.AnyPageGateActive ||
+         TopScreenGameOverChoicesPresented(inputs, runtimeSceneLatch,
+                                           gameOverRoute);
 }
 
 bool TopScreenRendererVisibilityCallDefersToGameOverDraw(

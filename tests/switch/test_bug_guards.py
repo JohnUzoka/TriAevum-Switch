@@ -35,9 +35,24 @@ GUARDS = [
           "present thread (a queue of its own) is not waited for",
           "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_draw.cpp",
           r'if \(!mDevice\.Mailbox\(\)\) \{\s*mDevice\.WaitPresentIdle\(\);\s*\}.*?'
-          r'mTargets\.ReadCopyRows\(\*source, key->Height, mFlipY, mCopyRgba, &readError\)',
+          r'mTargets\.BeginCopyRows\(\*source, key->Height, mFlipY, &readError\)',
           "oot3d_deko3d_backend_tests (TestRawTextureCopy)",
           forbid=r'mTargets\.ReadTarget\(\*source, mCopyRgba'),
+    # --- 11/18 (issue #19): Zelda's flashback at 15 FPS, every raw copy held the guest for the GPU ---
+    Guard("the flashback ran at 15 FPS (build 57, issue #19: one raw texture copy a frame, 38.5 ms each, "
+          "the guest stopped while the read-back waited for everything queued on the GPU): the read-back is "
+          "submitted with a fence and the guest's bytes are deferred to its first read of the destination",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_draw.cpp",
+          r'if \(mPendingCopy != nullptr && Deko3d::PicaTexturesReferenceCopy\(draw\.Textures, mPendingCopyId\)\) '
+          r'\{\s*ResolvePicaTextureCopy\(\);\s*\}.*?'
+          r'ResolvePicaTextureCopy\(\);\s*auto captured = std::make_shared<Deko3d::PicaCopyStore::Version>\(\);.*?'
+          r'version->Pending && mPhysicalMemoryDefer &&\s*mPhysicalMemoryDefer\(version->Spans,',
+          "oot3d_deko3d_backend_tests (TestRawTextureCopy)"),
+    Guard("the flashback ran at 15 FPS (issue #19): the copy's rows are read with a fence, not a queue wait",
+          "runtime/three_ds_recomp/src/fast/backends/gfx_deko3d_pica_targets.cpp",
+          r'dkCmdBufSignalFence\(cmd, &mCopyFence, true\);\s*mDevice->Submit\(\);\s*mCopyOutstanding = true;',
+          "oot3d_deko3d_backend_tests (TestRawTextureCopy)",
+          forbid=r'mDevice->WaitIdle\(\);\s*if \(dkQueueIsInErrorState'),
     Guard("the frame rate fell to 30 in a Temple of Time cutscene with the camera facing Link (0.2.3 candidate, "
           "logs34-36: governor estimate 15.3-16.8 ms without the body shadow, 16.2-17.9 with it, budget 16.7): "
           "the body shadow is skipped while Link is in a cutscene (stateFlags1 0x20000000), the foot shadows "
@@ -2335,6 +2350,26 @@ GUARDS = [
           "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
           r'ReadTopScreenWidePageState\(memory, &page\) &&\s+page\.ItemsActive\s+'
           r'\? NativeA32TouchPresentation::TopScreenWideItemsPage'),
+    # --- 11/18 (issue #20, 0.2.8-test.2): taps ignored on the Game Over questions and the dungeon Map ---
+    # The 3DS mod's touch helper (payload 0x005C8E0C) blanks the native touch
+    # state during the Game Over phases and on the dungeon Map, which it does
+    # not show on the 3DS touch screen. This port draws both on the one screen.
+    Guard("issue #20: after a Game Over the save and continue questions ignored taps (buttons worked): "
+          "the native touch state stayed blanked while the choices were drawn",
+          "tools/oot3d/ui_topscreen/oot3d_top_screen_mod_profile_pause.cpp",
+          r'inputs\.SceneSequence >= 3U && inputs\.SceneSequence <= 6U &&\s+!gameOverChoicesPresented;',
+          "oot3d_top_screen_mod_profile_tests (issue 20 Game Over choices)",
+          forbid=r'pauseCameraControlActive'),
+    Guard("issue #20: the drawn Game Over choices own the touch screen (they are not a pause page)",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
+          r'TopScreenNativeTouchPageActive\(\s+pauseInputs,',
+          "oot3d_top_screen_mod_profile_tests (issue 20 Game Over choices)"),
+    Guard("issue #20: the dungeon Map ignored taps until L/R changed the page; its moved item and floor "
+          "columns map back to their native touch rectangles",
+          "tools/oot3d/native_game_runtime/oot3d_native_a32_window_input.cpp",
+          r'page\.DungeonMapActive && !page\.SystemActive\s+'
+          r'\? NativeA32TouchPresentation::TopScreenWideDungeonMapPage',
+          "oot3d_native_a32_input_tests (TestSwitchDungeonMapTapLandsOnTheDrawnColumns)"),
     # --- 05/11: erasing a save file on the file select screen closed the game ---
     # The guest deletes "data:/save0N.bin" (worker 0x41E7B8) and sends any failed
     # result to its fatal-error handler. The host's DeleteFile made the save root

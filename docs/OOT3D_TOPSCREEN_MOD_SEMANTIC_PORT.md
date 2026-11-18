@@ -480,7 +480,7 @@ The focused original-code export in `tools/oot3d/decomp_support/analysis/topscre
 
 The native Gear, Map, and Items tabs remain touch-owned. Their recovered centers are `(96,221)`, `(160,221)`, and `(224,221)` in the original 320x240 touch domain. Interactive pause sessions map the host pointer through the contained 400x240 top-screen presentation and then invert the page placement into that unchanged touch domain: the relocated page is drawn one pixel per pixel at top-screen X + 40 (viewport `0,40,480,320`, or the wide pages' `-0.005`/`0.8` projection), and the widened Items page draws its grid at X + 63 and its sixth column at X + 80 (`oot3d_top_screen_page_layout.h`). An earlier version inverted a horizontal `400/320` scale instead, which put a tap on the first Items column on the second. The renderer owns containment and letterbox rejection, so clicks remain aligned at arbitrary output aspect ratios. Desktop shortcuts `G`, `M`, and `I` synthesize those same native touches, allowing direct page entry without relying on the TopScreen `START` remap; unchanged OoT3D `START` would open the save page.
 
-Switch native-page taps, like HUD button taps, remain pressed for at least two consuming 60 Hz guest-refresh polls so the game's 30 Hz update can observe a contact that lands and lifts between host polls. Non-consuming presentation polls do not shorten that latch. The first page finger remains the only native pointer, and the original HUD, aim, and host-menu ownership rules are unchanged. The Map regression drives both centred World Map and wide Dungeon Map draw placements through the real touch tracker and native pointer mapper at both possible update phases. Game Over touch gating and the payload's native coordinate suppression are unchanged; a failed save/continue prompt still needs a version and clip to identify its exact native phase.
+Switch native-page taps, like HUD button taps, remain pressed for at least two consuming 60 Hz guest-refresh polls so the game's 30 Hz update can observe a contact that lands and lifts between host polls. Non-consuming presentation polls do not shorten that latch. The first page finger remains the only native pointer, and the original HUD, aim, and host-menu ownership rules are unchanged. The Map regression drives both centred World Map and wide Dungeon Map draw placements through the real touch tracker and native pointer mapper at both possible update phases. The Game Over save and continue choices own the touch screen once they are drawn, and the wide Dungeon Map maps taps onto its moved side columns (record 28 below).
 
 Record 26 branches from `Camera_Normal1` at `0x0023A930` to payload entry
 `0x005D001C`. The typed source contract preserves the incoming scalar in the
@@ -605,7 +605,7 @@ that transform to `r1` at the two original callsites and delegates submission
 to the untouched native function.
 
 Record 28 at `0x0041E984` now retains the unchanged native
-`PauseTouchInput_Update` call at `0x004289DC` and source-ports its complete
+`PauseTouchInput_Update` call at `0x004289DC` and source-ports its
 post-call delta. Payload helper `0x005CCDFC` disables native touch hit testing
 for the shared transition route, scene mode 3 with runtime modes 1/2, scene
 variant 2 sequences 3..6 outside the runtime latch, or an active pause-camera
@@ -613,6 +613,19 @@ secondary layer. The typed adapter reproduces the payload's transient
 mode-3-preserving latch and writes the exact six native touch-state halfwords
 at `0x0050BB3A..0x0050BB48`: two `0x7FFF` coordinate sentinels and four zero
 fields. It is reset on savestate load and no payload storage is recreated.
+Two clauses hide screens the 3DS mod removes from the touch screen, which this
+port draws on its one screen, so they are adapted (issue 20). The sequence
+clause is the Game Over (`GameOver_Update` `0x00458AC0` phases 3..6): it stays
+while the delay and fade run and lifts once the record-41 route has drawn the
+choices (`TopScreenGameOverChoicesPresented`). Those choices then also own the
+host touch gate (`TopScreenNativeTouchPageActive`), since they belong to the
+native choice controller at `0x005C588C`, not to one of the four pause pages.
+The last clause is not a camera control: `0x002FCDD4` reads the Map page
+state `0x00506CB0+0x38` and `0x002F1268` the layer flag `0x004FDABC`, which
+`PauseDetail_Update` (`0x0042C0C8`) sets to 1 in dungeon and boss scenes. It is
+the dungeon Map and is not ported. Its side columns are drawn 40 pixels
+outwards by the 2.1.1 layout contracts while their native touch rectangles
+(`0x004435B0`) stay, so `TopScreenWideDungeonMapPage` maps those columns back.
 
 Record 41 at `0x00300544` now source-ports wrapper `0x005D0114` and payload
 controller `0x005CCEF4` around the unchanged draw at `0x00427A3C`. The typed

@@ -131,6 +131,11 @@ void PicaTargets::Reset() noexcept {
         }
     }
     mRetired.clear();
+    if (mCopyOutstanding) {
+        // The callers waited for the queue; the fence is signalled.
+        dkFenceWait(&mCopyFence, -1);
+        mCopyOutstanding = false;
+    }
     if (mCopyStaging != nullptr) {
         dkMemBlockDestroy(mCopyStaging);
         mCopyStaging = nullptr;
@@ -348,14 +353,17 @@ bool PicaTargets::ReadTarget(const PicaTarget& target, std::vector<uint8_t>& rgb
     return done;
 }
 
-bool PicaTargets::ReadCopyRows(const PicaTarget& target, uint32_t nativeHeight, bool bottomRowFirst,
-                               std::vector<uint8_t>& rgba8, std::string* error) {
+bool PicaTargets::BeginCopyRows(const PicaTarget& target, uint32_t nativeHeight, bool bottomRowFirst,
+                                std::string* error) {
     const auto fail = [error](const char* message) {
         if (error != nullptr) {
             *error = message;
         }
         return false;
     };
+    if (mCopyOutstanding) {
+        return fail("a texture copy read-back is still outstanding");
+    }
     const uint32_t width = target.Extent.Width;
     const uint64_t bytes64 = static_cast<uint64_t>(width) * nativeHeight * 4U;
     if (bytes64 == 0U || target.Extent.Height == 0U || bytes64 > 0x3FFFFFFFULL) {
@@ -363,7 +371,7 @@ bool PicaTargets::ReadCopyRows(const PicaTarget& target, uint32_t nativeHeight, 
     }
     const auto bytes = static_cast<uint32_t>(bytes64);
     if (mCopyStagingBytes < bytes) {
-        // Every read waited for the GPU: nothing writes the old block any more.
+        // The last read was finished: nothing writes the old block any more.
         if (mCopyStaging != nullptr) {
             dkMemBlockDestroy(mCopyStaging);
         }
@@ -382,13 +390,37 @@ bool PicaTargets::ReadCopyRows(const PicaTarget& target, uint32_t nativeHeight, 
         dkCmdBufCopyImageToBuffer(cmd, &target.ColorView, &rect, &rows, 0U);
     }
     dkCmdBufBarrier(cmd, DkBarrier_Full, DkInvalidateFlags_L2Cache);
+    // The fence (flushed) is reached once the rows are in memory; the work
+    // before and after it keeps the GPU busy while the CPU goes on.
+    dkCmdBufSignalFence(cmd, &mCopyFence, true);
     mDevice->Submit();
-    mDevice->WaitIdle();
-    if (dkQueueIsInErrorState(mDevice->Queue())) {
+    mCopyOutstanding = true;
+    mCopyWidth = width;
+    mCopyBytes = bytes;
+    return true;
+}
+
+bool PicaTargets::CopyRowsDone() {
+    return !mCopyOutstanding || dkFenceWait(&mCopyFence, 0) == DkResult_Success;
+}
+
+bool PicaTargets::FinishCopyRows(std::vector<uint8_t>& rgba8, uint32_t& width, std::string* error) {
+    const auto fail = [error](const char* message) {
+        if (error != nullptr) {
+            *error = message;
+        }
+        return false;
+    };
+    if (!mCopyOutstanding) {
+        return fail("no texture copy read-back is outstanding");
+    }
+    mCopyOutstanding = false;
+    if (dkFenceWait(&mCopyFence, -1) != DkResult_Success || dkQueueIsInErrorState(mDevice->Queue())) {
         return fail("the deko3d queue failed during a texture copy read-back");
     }
-    rgba8.resize(bytes);
-    std::memcpy(rgba8.data(), dkMemBlockGetCpuAddr(mCopyStaging), bytes);
+    rgba8.resize(mCopyBytes);
+    std::memcpy(rgba8.data(), dkMemBlockGetCpuAddr(mCopyStaging), mCopyBytes);
+    width = mCopyWidth;
     return true;
 }
 

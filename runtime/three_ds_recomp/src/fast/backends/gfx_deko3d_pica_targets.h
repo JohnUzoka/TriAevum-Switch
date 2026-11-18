@@ -120,11 +120,16 @@ class PicaTargets {
                      std::string* error);
     // A raw TextureCopy's source (gfx_deko3d_pica_copies.h): the colour rows
     // EncodePicaFramebuffer samples for a nativeHeight-row framebuffer, row r
-    // of `rgba8` (RGBA8, the target's width) for window row r. Records into the
-    // open frame, submits it and waits for the GPU like ReadTarget, but keeps
-    // its staging memory for the next copy.
-    bool ReadCopyRows(const PicaTarget& target, uint32_t nativeHeight, bool bottomRowFirst,
-                      std::vector<uint8_t>& rgba8, std::string* error);
+    // for window row r. BeginCopyRows records their copy-engine reads into the
+    // open frame with a fence after them and submits it, without waiting;
+    // FinishCopyRows waits for that fence and takes the rows (RGBA8, `width`
+    // the target's at the read). One read is outstanding at a time: a new one
+    // fails until the last is finished. Its staging memory is kept for the
+    // next copy.
+    bool BeginCopyRows(const PicaTarget& target, uint32_t nativeHeight, bool bottomRowFirst, std::string* error);
+    // Whether the outstanding read is written (no wait; true without one).
+    [[nodiscard]] bool CopyRowsDone();
+    bool FinishCopyRows(std::vector<uint8_t>& rgba8, uint32_t& width, std::string* error);
     // The Z24S8 word layout the copy engine reads and writes, probed once on a
     // small compressed target like the real ones: a clear read back gives the
     // layout, a written pattern read back proves writes reach the image. Leaves
@@ -164,8 +169,12 @@ class PicaTargets {
     std::vector<Retired> mRetired;
     std::optional<DepthStencilWordLayout> mDepthStencilLayout;
     PicaTargetStats mStats{};
-    DkMemBlock mCopyStaging = nullptr; // ReadCopyRows; freed by Reset
+    DkMemBlock mCopyStaging = nullptr; // BeginCopyRows; freed by Reset
     uint32_t mCopyStagingBytes = 0;
+    DkFence mCopyFence{};       // signalled after the outstanding read
+    bool mCopyOutstanding = false;
+    uint32_t mCopyWidth = 0;    // of the outstanding read's rows
+    uint32_t mCopyBytes = 0;
 };
 
 } // namespace Fast::Deko3d

@@ -109,17 +109,17 @@ bool ExecuteTopScreenUiSourcePortBlock(
     }
     dispatch.TopScreenTouchCoordinateUpdatePhase = 0U;
     Oot3dNativeGame::TopScreenPauseDrawInputs inputs;
-    std::uint32_t pauseCameraControl = 0U;
-    std::uint32_t secondaryLayer = 0U;
-    if (!Oot3dNativeGame::ReadTopScreenPauseDrawInputs(memory, &inputs) ||
-        !memory.Read32(0x00506CE8U, &pauseCameraControl) ||
-        !memory.Read32(0x004FDABCU, &secondaryLayer)) {
+    if (!Oot3dNativeGame::ReadTopScreenPauseDrawInputs(memory, &inputs)) {
       return false;
     }
     const bool routeActive = Oot3dNativeGame::ResolveTopScreenPauseRouteActive(
         inputs, &dispatch.TopScreenPauseRoute);
+    const bool gameOverChoicesPresented =
+        Oot3dNativeGame::TopScreenGameOverChoicesPresented(
+            inputs, dispatch.TopScreenTouchCoordinateRoute.RuntimeSceneLatch,
+            dispatch.TopScreenRendererVisibilityRoute);
     if (Oot3dNativeGame::ResolveTopScreenTouchCoordinateSuppression(
-            inputs, routeActive, pauseCameraControl != 0U, secondaryLayer == 1U,
+            inputs, routeActive, gameOverChoicesPresented,
             &dispatch.TopScreenTouchCoordinateRoute) &&
         !Oot3dNativeGame::ApplyTopScreenTouchCoordinateSuppression(memory)) {
       return false;

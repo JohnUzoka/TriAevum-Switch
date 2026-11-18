@@ -1002,20 +1002,38 @@ void TestRawTextureCopy() {
   // A 32-byte texture at 0x2000: CPU-owned bytes there (0xAA), zeros where
   // copy 5 owns 0x2008..0x2018; copy 5 wrote 0x2004..0x200C and 0x200C..0x201C.
   PicaCopyStore store;
-  PicaCopyStore::Version version;
-  version.Spans = {{0U, 0x2004U, 8U}, {0U, 0x200CU, 16U}};
-  for (uint8_t i = 0; i < 24U; ++i) version.Bytes.push_back(static_cast<uint8_t>(0x10U + i));
-  store.Put(5U, version);
-  std::vector<uint8_t> base(32U, 0U);
-  for (size_t i = 0; i < 8U; ++i) base[i] = 0xAAU;
+  auto version = std::make_shared<PicaCopyStore::Version>();
+  version->Spans = {{0U, 0x2004U, 8U}, {0U, 0x200CU, 16U}};
   const Fast::Renderer3ds::PicaTextureCopyReference reference{5U, 0U, 0x2008U, 16U};
   Fast::Renderer3ds::PicaTextureView view;
+  std::vector<uint8_t> base(32U, 0U);
+  for (size_t i = 0; i < 8U; ++i) base[i] = 0xAAU;
   view.PhysicalAddress = 0x2000U;
   view.NativeBytes = base;
   view.NativeContentHashAvailable = true;
   view.CopyReferences = std::span(&reference, 1U);
   std::vector<uint8_t> scratch;
   Fast::Renderer3ds::PicaTextureView filled;
+
+  // Issue #19 (Zelda's flashback at 15 FPS): the copy's read-back is only
+  // submitted; until it is taken the version has no bytes, a texture over it
+  // keeps the zeros and a guest read leaves its bytes. A draw sampling it is
+  // what makes the backend take it first.
+  version->Pending = true;
+  store.Put(5U, version);
+  Require(!store.Fill(view, scratch, filled), "a copy still reading back fills nothing");
+  std::array<uint8_t, 4> guest{0x77U, 0x77U, 0x77U, 0x77U};
+  Require(!ReadPicaCopyBytes(*version, 0x2008U, guest) && guest[0] == 0x77U && guest[3] == 0x77U,
+          "a guest read of a copy still reading back leaves its bytes");
+  std::array<Fast::Renderer3ds::PicaTextureView, 2> drawTextures{};
+  drawTextures[1].CopyReferences = std::span(&reference, 1U);
+  Require(PicaTexturesReferenceCopy(drawTextures, 5U) && !PicaTexturesReferenceCopy(drawTextures, 6U) &&
+              !PicaTexturesReferenceCopy(std::span(drawTextures.data(), 1U), 5U),
+          "a draw samples the copy when one of its textures names it");
+
+  // Taken: the encoded bytes, span by span.
+  for (uint8_t i = 0; i < 24U; ++i) version->Bytes.push_back(static_cast<uint8_t>(0x10U + i));
+  version->Pending = false;
   Require(store.Fill(view, scratch, filled), "a captured copy fills the texture");
   bool expected = filled.NativeBytes.size() == 32U && !filled.NativeContentHashAvailable;
   for (size_t i = 0; i < 32U && expected; ++i) {
@@ -1025,11 +1043,25 @@ void TestRawTextureCopy() {
     expected = filled.NativeBytes[i] == want;
   }
   Require(expected, "only the referenced bytes change, from the version's spans");
+  // The guest's deferred read of the destination: 0x200A..0x200E crosses the
+  // two spans; 0x2002..0x2006 starts before the first (left as it was).
+  Require(ReadPicaCopyBytes(*version, 0x200AU, guest) && guest[0] == 0x16U && guest[1] == 0x17U &&
+              guest[2] == 0x18U && guest[3] == 0x19U,
+          "a guest read across two spans gets each span's bytes");
+  guest.fill(0x77U);
+  Require(ReadPicaCopyBytes(*version, 0x2002U, guest) && guest[0] == 0x77U && guest[1] == 0x77U &&
+              guest[2] == 0x10U && guest[3] == 0x11U,
+          "bytes no span wrote keep the guest's");
   const Fast::Renderer3ds::PicaTextureCopyReference uncaptured{6U, 0U, 0x2008U, 16U};
   view.CopyReferences = std::span(&uncaptured, 1U);
   Require(!store.Fill(view, scratch, filled), "an uncaptured copy keeps the zeros");
+  // A read-back that failed: taken, without bytes.
+  auto failed = std::make_shared<PicaCopyStore::Version>();
+  failed->Spans = version->Spans;
+  store.Put(6U, failed);
+  Require(!store.Fill(view, scratch, filled) && !ReadPicaCopyBytes(*failed, 0x2008U, guest),
+          "a copy whose read-back failed fills nothing");
 
-  store.Put(6U, version);
   store.MarkMaterialized(5U);
   Require(store.Find(5U)->Materialized && !store.Find(6U)->Materialized, "materialized per version");
   store.Retain(std::span(&reference, 1U));
@@ -1037,6 +1069,8 @@ void TestRawTextureCopy() {
           "versions no pinned reference names go");
   store.Retain({});
   Require(store.Count() == 0U, "an empty pin set releases every version");
+  Require(ReadPicaCopyBytes(*version, 0x200CU, guest) && guest[0] == 0x18U,
+          "a deferred guest read keeps its version after the pin set released it");
 }
 
 int main() {

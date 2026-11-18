@@ -3185,11 +3185,11 @@ int main() {
   touchRouteInputs.SceneMode = 3U;
   touchRouteInputs.RuntimeMode = 1U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState),
+              touchRouteInputs, false, false, &touchRouteState),
           "ordinary mode-3 scene used the obsolete TopScreen 1.1 route");
   touchRouteInputs.EntranceIndex = 0xFFF3U;
   Require(ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState),
+              touchRouteInputs, false, false, &touchRouteState),
           "TopScreen 1.2 title-demo route did not suppress touch coordinates");
   touchRouteInputs.RuntimeMode = 0U;
   touchRouteInputs.EntranceIndex = 0U;
@@ -3197,27 +3197,28 @@ int main() {
   touchRouteInputs.SceneSequence = 4U;
   touchRouteInputs.NativeTransitionActive = true;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, &touchRouteState) &&
               touchRouteState.RuntimeSceneLatch,
           "record-28 runtime latch did not block its sequence route");
   touchRouteInputs.NativeTransitionActive = false;
   touchRouteInputs.SceneMode = 0U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, &touchRouteState) &&
               !touchRouteState.RuntimeSceneLatch,
           "record-28 runtime latch did not clear outside scene mode three");
   touchRouteInputs.SceneMode = 3U;
   Require(ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState),
+              touchRouteInputs, false, false, &touchRouteState),
           "record-28 sequence route did not suppress touch coordinates");
+  Require(!ResolveTopScreenTouchCoordinateSuppression(
+              touchRouteInputs, false, true, &touchRouteState),
+          "drawn Game Over choices kept their touch coordinates suppressed");
   touchRouteInputs.SceneSequence = 7U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, &touchRouteState) &&
               ResolveTopScreenTouchCoordinateSuppression(
-                  touchRouteInputs, true, false, false, &touchRouteState) &&
-              ResolveTopScreenTouchCoordinateSuppression(
-                  touchRouteInputs, false, true, true, &touchRouteState),
-          "record-28 route and secondary-layer predicates changed");
+                  touchRouteInputs, true, true, &touchRouteState),
+          "record-28 route predicate changed");
 
   NativeA32Memory touchCoordinateMemory;
   Require(touchCoordinateMemory.MapRegion(
@@ -3362,19 +3363,55 @@ int main() {
   Require(visibilityMemory.Write32(visibilityOwnerSlot, 0U) &&
               visibilityMemory.Write8(visibilityRenderer + 0x6CU, 1U),
           "cannot seed GameOver product draw fixture");
+  // Issue 20: the save question and then the continue question after a Game
+  // Over ignored taps. Native touch stays hidden during the delay and fade
+  // (nothing is drawn yet) and reaches the native choices once they are drawn.
+  TopScreenTouchCoordinateRouteState gameOverTouchRoute;
   for (unsigned frame = 0; frame < 85U; ++frame) {
     Require(PrepareTopScreenGameOverDraw(
                 visibilityMemory, visibilityController, gameOverDraw, false,
                 &visibilityState, &error),
             "GameOver product draw failed");
+    const bool presented = TopScreenGameOverChoicesPresented(
+        gameOverDraw, gameOverTouchRoute.RuntimeSceneLatch, visibilityState);
+    Require(presented == (frame >= 83U),
+            "Game Over choices counted as drawn before the delay and fade ended");
+    Require(ResolveTopScreenTouchCoordinateSuppression(
+                gameOverDraw, false, presented, &gameOverTouchRoute) ==
+                !presented,
+            "Game Over touch was hidden from the drawn choices, or reached them "
+            "before they were drawn");
+    // No pause page is open: the drawn choices alone take the touch screen.
+    Require(TopScreenNativeTouchPageActive(
+                gameOverDraw, gameOverTouchRoute.RuntimeSceneLatch,
+                visibilityState) == presented,
+            "the touch screen did not follow the drawn Game Over choices");
   }
   Require(visibilityState.DelayCalls == 60 && visibilityState.FadeStep == 24 &&
               visibilityMemory.Read32(visibilityOwnerSlot, &reconciledOwner) &&
               reconciledOwner == visibilityRenderer,
           "GameOver did not migrate native choices after delay/fade");
+  // The save and continue questions both run inside the native Game Over
+  // phases 3..6 (the issue 46 capture shows the save question in phase 5).
+  for (const auto phase : {4U, 5U, 6U}) {
+    gameOverDraw.SceneSequence = static_cast<std::uint16_t>(phase);
+    const bool presented = TopScreenGameOverChoicesPresented(
+        gameOverDraw, gameOverTouchRoute.RuntimeSceneLatch, visibilityState);
+    Require(presented && !ResolveTopScreenTouchCoordinateSuppression(
+                             gameOverDraw, false, presented,
+                             &gameOverTouchRoute),
+            "a drawn Game Over question did not accept taps");
+    Require(TopScreenNativeTouchPageActive(gameOverDraw,
+                                           gameOverTouchRoute.RuntimeSceneLatch,
+                                           visibilityState),
+            "a drawn Game Over question did not own the touch screen");
+  }
   for (const auto phase : {0U, 2U, 7U}) {
     gameOverDraw.SceneSequence = static_cast<std::uint16_t>(phase);
     visibilityState.FadeStep = 24;
+    Require(!TopScreenGameOverChoicesPresented(gameOverDraw, false,
+                                               visibilityState),
+            "a phase outside Game Over counted as drawn choices");
     Require(visibilityMemory.Write32(visibilityOwnerSlot, 0U) &&
                 PrepareTopScreenGameOverDraw(
                     visibilityMemory, visibilityController, gameOverDraw, false,
@@ -3386,6 +3423,9 @@ int main() {
   }
   gameOverDraw.SceneSequence = 5U;
   visibilityState.FadeStep = 24;
+  Require(!TopScreenGameOverChoicesPresented(gameOverDraw, true,
+                                             visibilityState),
+          "the runtime scene latch counted as drawn Game Over choices");
   Require(PrepareTopScreenGameOverDraw(
               visibilityMemory, visibilityController, gameOverDraw, true,
               &visibilityState, &error) && visibilityState.FadeStep == 0,
@@ -3402,6 +3442,9 @@ int main() {
               &visibilityState, &error) && visibilityState.FadeStep == 24 &&
               visibilityState.DelayCalls == 60,
           "resumed choices must use the centered draw on their first frame");
+  Require(TopScreenGameOverChoicesPresented(gameOverDraw, false,
+                                            visibilityState),
+          "choices restored from a savestate did not accept taps at once");
 
   // Product: the call 0x00300544 and the hook at 0x00427A3C shared the same
   // delay/fade state. Simulates a frame (call, then the native draw

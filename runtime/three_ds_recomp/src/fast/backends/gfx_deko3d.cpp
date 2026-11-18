@@ -87,6 +87,9 @@ void GfxRenderingAPIDeko3d::Shutdown() {
     if (mDeviceReady) {
         LogPicaProgramCounters("shutdown");
         mDevice.WaitIdle();
+        // A deferred guest read after this finds the copy's bytes taken, and
+        // never reaches the backend.
+        ResolvePicaTextureCopy();
         ShutdownUi();
         mVertexStages.Clear();
         mFragmentStages.Clear();
@@ -747,9 +750,14 @@ void GfxRenderingAPIDeko3d::LogPicaProgramCounters(const char* when) {
                 static_cast<unsigned long long>(mCalls.Clears), static_cast<unsigned long long>(mCalls.Resets),
                 static_cast<unsigned long long>(mCalls.CompletionsQueued),
                 static_cast<unsigned long long>(mCalls.CompletionsTaken));
+    const double copies = mCounters.PicaTextureCopies == 0U ? 1.0 : static_cast<double>(mCounters.PicaTextureCopies);
+    // texture_copies: "ms each" is what the guest waited for at a copy (the
+    // read-back's submission, or all of it when the guest's bytes could not be
+    // deferred); "wait" and "encode" are the read-back's later take: the GPU
+    // reaching it and the rows out of staging, then their encoding.
     Deko3d::Log("pica (%s): draws issued=%llu skipped=%llu shadow_producers=%llu no_effect=%llu; transfers=%llu "
                 "repeated=%llu rejected=%llu texture_copies=%llu (reused %llu, failed %llu, sampled %llu, "
-                "%.1f ms each, max %.1f) "
+                "deferred %llu, %.1f ms each, max %.1f; read-back wait %.1f ms, encode %.1f ms each) "
                 "scanouts=%llu fills=%llu clears=%llu; targets=%llu (%llu MiB) displays=%llu failures=%llu",
                 when, static_cast<unsigned long long>(mCounters.PicaDrawsIssued),
                 static_cast<unsigned long long>(mCounters.PicaDrawsSkipped),
@@ -762,10 +770,9 @@ void GfxRenderingAPIDeko3d::LogPicaProgramCounters(const char* when) {
                 static_cast<unsigned long long>(mCounters.PicaTextureCopiesReused),
                 static_cast<unsigned long long>(mCounters.PicaTextureCopiesFailed),
                 static_cast<unsigned long long>(mResources.Stats().CopiedTextures),
-                mCounters.PicaTextureCopies == 0U
-                    ? 0.0
-                    : mCounters.PicaTextureCopyMilliseconds / static_cast<double>(mCounters.PicaTextureCopies),
-                mCounters.PicaTextureCopyMaxMilliseconds,
+                static_cast<unsigned long long>(mCounters.PicaTextureCopiesDeferred),
+                mCounters.PicaTextureCopyMilliseconds / copies, mCounters.PicaTextureCopyMaxMilliseconds,
+                mCounters.PicaTextureCopyWaitMilliseconds / copies, mCounters.PicaTextureCopyEncodeMilliseconds / copies,
                 static_cast<unsigned long long>(mCounters.PicaScanouts),
                 static_cast<unsigned long long>(mCounters.PicaFills),
                 static_cast<unsigned long long>(mCounters.PicaClears),
