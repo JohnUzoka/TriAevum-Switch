@@ -2,6 +2,7 @@
 #include "fast/oot3d/graphics_settings_window.h"
 #include <filesystem>
 #include <memory>
+#include <string_view>
 namespace Oot3dNativeGame {
 // Debug menu tab "Updates" (Switch): the installed version, the
 // update channel (config/update_channel: stable or test), the repository
@@ -10,7 +11,7 @@ namespace Oot3dNativeGame {
 // cancel, and "Close game" so the installed version runs at the next launch.
 // `root` is sdmc:/switch/oot3dre.
 std::shared_ptr<Fast::Oot3d::GraphicsSettingsPanelTab>
-CreateUpdatePanel(std::filesystem::path root);
+CreateUpdatePanel(std::filesystem::path root, std::string_view nroLaunchPath);
 // At start-up, before anything opens the managed files: finishes an update
 // installed by the previous run (oot3d_update_release.h,
 // ApplyPendingUpdate) and logs what it did to logs/update.txt.

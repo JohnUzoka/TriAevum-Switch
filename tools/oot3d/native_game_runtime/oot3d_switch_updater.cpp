@@ -74,8 +74,9 @@ std::string Megabytes(std::uint64_t bytes) {
 } // namespace
 
 SwitchUpdater::SwitchUpdater(std::filesystem::path root, std::string repository,
-                             std::uint64_t installedBuild)
-    : mRoot(std::move(root)), mRepository(std::move(repository)), mInstalledBuild(installedBuild) {}
+                             std::uint64_t installedBuild, std::string_view nroLaunchPath)
+    : mRoot(std::move(root)), mRepository(std::move(repository)), mInstalledBuild(installedBuild),
+      mLaunchedManagedNro(IsManagedNroLaunchPath(mRoot, nroLaunchPath)) {}
 
 SwitchUpdater::~SwitchUpdater() {
   mCancel.store(true);
@@ -236,6 +237,14 @@ void SwitchUpdater::RunCheckSteps() {
 }
 
 void SwitchUpdater::RunInstall() {
+  if (!mLaunchedManagedNro) {
+    Finish(Phase::Failed,
+           "Updates can only replace switch/oot3dre/oot3d_native_game.nro. "
+           "Launch that file from the Homebrew Menu, or recreate your HOME Menu forwarder "
+           "to point to it, then check for updates. If the file is missing, extract the release ZIP "
+           "over your existing installation without deleting the folder.");
+    return;
+  }
   QualifiedRelease release;
   {
     std::scoped_lock lock(mMutex);

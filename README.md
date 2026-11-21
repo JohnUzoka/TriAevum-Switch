@@ -33,6 +33,10 @@ dump and decrypt it. eShop copies (`.cia`) and other versions are not supported.
   (merge, replace files); it has no `config/` folder, so your settings are kept too. The game writes its
   default settings only into a new install, and a default a later version adds only where you have no
   such file.
+  Start `switch/oot3dre/oot3d_native_game.nro` for in-game installs. If your HOME Menu forwarder
+  points to a different file (such as `oot3dre.nro`), recreate it to point to the shipped NRO, or
+  launch the shipped NRO from the full-memory Homebrew Menu. If the file is missing, merge the
+  release ZIP into the existing installation first. You do not need a clean install.
 - **Performance:** at stock clocks lighter areas run at full speed and busy ones slow down (the CPU is
   the limit). L3+R3 → Video → **Performance mode** On raises the CPU to 1224 MHz, the GPU to 460.8 MHz
   and the memory to 1600 MHz (each also on its own row; off by default, more battery use); the clocks

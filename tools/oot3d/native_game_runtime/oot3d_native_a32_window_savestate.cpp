@@ -1,11 +1,39 @@
 // Native A32 window session: savestate save, load and the restore of renderer and title state.
 #include "oot3d_native_a32_window_session.h"
+#include "oot3d_game_log.h"
+#include "oot3d_ui/guest_ui_layout.h"
+#include "oot3d_ui/ui_gameplay_hud_inline_semantics.h"
 #include "fast/renderer3ds/pica_framebuffer_encode.h"
 #include "fast/renderer3ds/pica_guest_extent_snapshot.h"
 
 #include <optional>
 
 namespace Oot3dA32Window {
+namespace {
+
+std::string SavestateSlotLabel(Oot3dNativeGame::NativeA32Memory &memory) {
+  using namespace oot3d::ui::guest_layout::save_context;
+  constexpr auto base = oot3d::ui::kOot3dSaveContextAddress;
+  std::uint32_t mode = 0, slot = 0;
+  std::uint8_t masterQuest = 0;
+  if (!memory.Read32(base + kGameMode, &mode) || mode != 0U ||
+      !memory.Read32(base + kFileNum, &slot) || slot >= 3U ||
+      !memory.Read8(base + kMasterQuestFlag, &masterQuest)) {
+    return {};
+  }
+  return std::string(masterQuest ? "Master Quest" : "Normal Quest") +
+         " slot 0" + static_cast<char>('0' + slot);
+}
+
+std::string LogSavestateSlot(Oot3dNativeGame::NativeA32Memory &memory,
+                            const char *action, const std::filesystem::path &path) {
+  auto slot = SavestateSlotLabel(memory);
+  Oot3dNativeGame::WriteGameLog(std::string("savestate: ") + action + " " +
+      path.filename().string() + "; " + (slot.empty() ? "no active game slot" : slot));
+  return slot;
+}
+
+} // namespace
 
 void NativeA32WindowSession::RestoreSavestateTiming(const Oot3dNativeGame::NativeA32SavestateRuntimeState &runtime) {
   auto &frameRatePolicy = *frameRatePolicyStorage;
@@ -417,7 +445,7 @@ NativeA32WindowSession::SaveState(const std::filesystem::path &path, bool withSe
   savestateStats.WriteSeconds += ioResult.IoSeconds;
   std::cout << "oot3d_native_game: saved state at frame " << frameCount
             << " to " << path.string() << '\n';
-  lastSavestateMessage.clear();
+  lastSavestateMessage = LogSavestateSlot(process.Memory(), "saved", path);
   return SaveStateOutcome::Saved;
 }
 
@@ -571,6 +599,10 @@ bool NativeA32WindowSession::LoadState(const std::filesystem::path &path,
   savestateStats.RestoreSeconds += ioResult.RestoreSeconds;
   std::cout << "oot3d_native_game: loaded state at frame " << frameCount
             << " from " << path.string() << '\n';
+  if (auto slot = LogSavestateSlot(process.Memory(), "loaded", path); !slot.empty()) {
+    if (!lastSavestateMessage.empty()) lastSavestateMessage += '\n';
+    lastSavestateMessage += slot;
+  }
   return true;
 }
 
@@ -631,12 +663,14 @@ void NativeA32WindowSession::ServiceSavestateRequests() {
     case SaveStateOutcome::Failed:
       report(false, "Save state failed: " + lastSavestateMessage);
       return;
-    case SaveStateOutcome::Saved:
+    case SaveStateOutcome::Saved: {
       savestateLibrary->SetLastState(path);
-      report(true, std::string(request->WithSettings ? "State and settings saved: "
-                                                     : "State saved: ") +
-                       fileName(path));
+      std::string message = (request->WithSettings ? "State and settings saved: " : "State saved: ") +
+                            fileName(path);
+      if (!lastSavestateMessage.empty()) message += "\n" + lastSavestateMessage;
+      report(true, std::move(message));
       return;
+    }
     }
     return;
   }

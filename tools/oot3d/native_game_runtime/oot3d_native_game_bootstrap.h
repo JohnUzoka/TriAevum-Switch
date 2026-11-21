@@ -15,6 +15,9 @@
 
 struct Oot3dNativeGameLaunch {
     Args Host;
+#if defined(__SWITCH__)
+    std::string SwitchNroLaunchPath;
+#endif
     std::filesystem::path A32ProcessManifestPath;
     std::filesystem::path TopScreenTextureOverridePackPath;
     // TopScreen's HD UI atlas: the pack's oot3d/topscreen/3.0/ui_atlas at an

@@ -498,6 +498,9 @@ note is `docs/SAVE_SAFETY.pt-BR.md`; the code is `oot3d_native_a32_ctr_save_safe
   and earlier (absolute paths) still load. The journal belongs to the run, not to the state: a restore
   keeps the pending writes and backups and forgets writer handles the state does not have. A run
   that starts by loading a state runs the recovery first.
+  The snapshot restores the title's active file number and quest from guest memory. It does not
+  load or overwrite a normal save file. Save/load notices and `logs/oot3d_native_game.log` show
+  the captured or restored quest and file slot while in gameplay.
 - **This branch:** no per-title save folders (english runs only OoT3D); DeleteFile keeps
   `bce4b02e`'s per-component walk after Gustavo's lexical check; `TRIAEVUM_SAVE_*` lines also go to
   `logs/oot3d_native_game.log` (stderr is a null device on the Switch), with one
@@ -734,7 +737,27 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
   Log: `deferred N` and `read-back wait / encode` in `texture_copies`. Remaining cost: the scene before the
   copy is drawn twice a frame (dependency namespace and presentation). The sepia filter itself was the
   missing `frag_8edf3b189196514f` (uber path, one draw per copy), now in console-missing. Test:
-  `TestRawTextureCopy`. [INFERENCE: expected 20-30 FPS, not 60; console logs from 0.2.8-test.3 decide.]
+  `TestRawTextureCopy`.
+- **Retest (issue #19, build 59, 11/19):** clean `spot00` windows still run at 14.09–14.43 FPS (build
+  57: 14.23–14.91 FPS, at higher clocks). The shaders are present (`missing=0`, `uber=0`), and 696
+  guest copies successfully deferred. The same 1,393 raw-copy calls now capture 1,380 times and reuse
+  13, versus 696 captures and 697 reuses on build 57. `pica_submit` still costs 45–47 ms/frame. Before
+  changing the copy strategy again, trace completion IDs, pin eviction, replay namespace and the
+  read-back trigger to identify why previously reused copies are captured again.
+- **Final battle report (#19, 11/20):** the weakest `ganon_demo` window averaged 3.82 FPS and
+  262.2 ms of GPU busy time, of which 61.1 ms was opaque rendering; it was not idle waiting
+  for the CPU. The next window recovered to 7.77 FPS, still with 128.9 ms of GPU work.
+  Separately, the courtyard ran at 11.4–11.7 FPS with 67–70 ms in PICA submission.
+  Added precompiled variants from the new logs; sustained finale and copy costs are not
+  verified fixed. Retest with the same settings for comparison, or try native lighting and
+  a lower handheld render scale to lower GPU load.
+
+### Fish and Blue Fire purchases crash (#22, 11/20)
+- Four faults on build 56 in scenes `0x2F` and `0x30`, all at EUR `0x004C30C0`: the
+  player talk action reaches the textbox-close branch and dereferences a null actor loaded
+  from `Player+0x172C`. Faults occur with Simple Shadow off. The logs do not establish why
+  the actor pointer was null. Do not skip the action or synthesize an actor; a regular save
+  just before the purchase would let us compare the same transaction with stock OoT3D.
 
 ### D-pad items for child and adult Link (SingleScreen 3.2.2 buttons 6..9, 11/10)
 - **Asked:** the Single Screen photos show items on the D-pad. 3.2.2 lets each direction hold
@@ -1169,6 +1192,14 @@ pc=0x002C5074 detail=4`, a read of address 4 in `RendererModelResource_Construct
 - **Check:** run and jump in Kokiri Forest and Hyrule Field at 60 FPS: his back and boots keep their colour; the
   ground shadow stays at his feet. If his back still darkens in some frames, the follow-up is a capsule from his
   previous frame's position.
+
+### Kokiri Forest: native boot clearance at a low camera angle
+- The collision heights in both Switch saves match the stock Kokiri collision polygons.
+  At the second spot the visible road is at Y 0.026 while the collision floor is at Y 0.932.
+  The animated soles also clear the road with Simple Shadow off. The low camera and the edge
+  of the directional decal make the clearance easier to see; the decal does not alter collision.
+- Removed the experimental contact spots, grazing fade, model drop and test selectors. Keep
+  the native pose and collision and the existing Simple Shadow decal and self-mask.
 
 ### Simple shadow: the Temple of Time's marble had none (user, 0.2.5-test.4, 11/13)
 - **Seen:** "in the Temple of Time Link's shadow is not showing on the floor, only the carpet" (no clip; logs48 has
@@ -5149,6 +5180,12 @@ Checked against deko3d 0.5.0's source (`source/maxwell/gpu_base.cpp`, `dk_queue.
   be open (`resources.o2r` is), so the next start swaps them before anything opens them
   (`FinishPendingUpdate` in `main`; a journal for another build is dropped). Cancel or any failure
   removes the `.new` files and leaves the installed version as it was. Log: `logs/update.txt`.
+- Before downloading, `SwitchUpdater` compares the original loader `argv[0]` to the managed NRO.
+  Issue #19 launched a different file (`/switch/oot3dre/oot3dre.nro`), which would stay unchanged
+  even after a successful install to the shipped path. Checks still work from a renamed copy; an
+  install stops with instructions to launch the shipped NRO directly or recreate the forwarder.
+  The launch argument never selects a write destination. Tests cover both loader path spellings,
+  case differences on FAT, and wrong paths.
 - After an install the tab offers "Close game" (confirmation), which exits like Exit game; the new
   version runs at the next launch. The loader cannot start it directly (see Exit game). Rollback:
   rename `oot3d_native_game.nro.old` back to `oot3d_native_game.nro`.

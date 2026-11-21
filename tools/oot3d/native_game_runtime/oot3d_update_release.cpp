@@ -1,4 +1,5 @@
 #include "oot3d_update_release.h"
+#include "oot3d_switch_launch_environment.h"
 
 #include <nlohmann/json.hpp>
 
@@ -466,6 +467,17 @@ OfferKind ClassifyOffer(std::uint64_t installedBuild, std::uint64_t releaseBuild
 }
 
 // --- Installing -----------------------------------------------------------
+
+bool IsManagedNroLaunchPath(const std::filesystem::path &root, std::string_view launchPath) {
+  const auto sdPath = [](std::string_view path) {
+    if (path.starts_with("sdmc:")) path.remove_prefix(5);
+    return path;
+  };
+  // The homebrew loader can report sdmc:/... or /..., and FAT ignores case.
+  const std::string running = Lower(WithoutQuotes(launchPath));
+  const std::string target = Lower((root / kNroPath).generic_string());
+  return sdPath(running).starts_with('/') && sdPath(running) == sdPath(target);
+}
 
 std::filesystem::path StagedPath(const std::filesystem::path &target) {
   return WithSuffix(target, ".new");

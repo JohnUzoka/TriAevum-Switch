@@ -118,8 +118,12 @@ bool ExecuteTopScreenUiSourcePortBlock(
         Oot3dNativeGame::TopScreenGameOverChoicesPresented(
             inputs, dispatch.TopScreenTouchCoordinateRoute.RuntimeSceneLatch,
             dispatch.TopScreenRendererVisibilityRoute);
+    const bool nativeFrontendPresented =
+        dispatch.UiLifecycleBridge != nullptr &&
+        dispatch.UiLifecycleBridge->NativeFrontendPresentationActive();
     if (Oot3dNativeGame::ResolveTopScreenTouchCoordinateSuppression(
             inputs, routeActive, gameOverChoicesPresented,
+            nativeFrontendPresented,
             &dispatch.TopScreenTouchCoordinateRoute) &&
         !Oot3dNativeGame::ApplyTopScreenTouchCoordinateSuppression(memory)) {
       return false;

@@ -78,6 +78,18 @@ void TestPaths() {
     }
 }
 
+void TestManagedNroLaunchPath() {
+  const fs::path root = "sdmc:/switch/oot3dre";
+  for (const char *good : {"sdmc:/switch/oot3dre/oot3d_native_game.nro",
+                           "/switch/oot3dre/oot3d_native_game.nro",
+                           "\"SDMC:/Switch/OOT3DRE/OOT3D_NATIVE_GAME.NRO\""})
+    Require(IsManagedNroLaunchPath(root, good), "loader path names the NRO installed by OTA");
+  for (const char *bad : {"", "oot3d_native_game.nro", "/switch/oot3dre/oot3dre.nro",
+                          "sdmc:/switch/other/oot3d_native_game.nro",
+                          "other:/switch/oot3dre/oot3d_native_game.nro"})
+    Require(!IsManagedNroLaunchPath(root, bad), "OTA cannot replace the NRO launched at another path");
+}
+
 std::string Sha(char digit) { return std::string(64, digit); }
 
 std::string Manifest(const std::string &version, unsigned build, const char *channel,
@@ -377,6 +389,7 @@ int main() {
   TestVersions();
   TestChannels();
   TestPaths();
+  TestManagedNroLaunchPath();
   TestManifest();
   TestSelection();
   TestQualify();

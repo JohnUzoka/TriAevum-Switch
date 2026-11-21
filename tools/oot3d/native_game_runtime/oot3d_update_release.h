@@ -140,6 +140,11 @@ OfferKind ClassifyOffer(std::uint64_t installedBuild, std::uint64_t releaseBuild
 
 inline constexpr std::string_view kPendingJournal = "update/pending.json";
 
+// Installs may only replace the shipped NRO, not some other copy or a
+// renamed file a HOME Menu forwarder points to. Compare loader path syntax
+// without using argv to select any write destination.
+bool IsManagedNroLaunchPath(const std::filesystem::path &root, std::string_view launchPath);
+
 std::filesystem::path StagedPath(const std::filesystem::path &target); // <target>.new
 std::filesystem::path BackupPath(const std::filesystem::path &target); // <target>.old
 

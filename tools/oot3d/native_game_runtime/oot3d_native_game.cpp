@@ -228,6 +228,8 @@ int main(int argc, char** argv) {
         WriteSwitchBootStatus("starting", {},
                               Oot3dNativeGame::FormatSwitchLaunchEnvironment(launchEnvironment));
         Oot3dNativeGame::WriteGameLog(Oot3dNativeGame::FormatSwitchLaunchLine(launchEnvironment));
+        if (!launchEnvironment.Arguments.empty())
+            launch.SwitchNroLaunchPath = launchEnvironment.Arguments.front();
         // The defaults of a first install (and those a release adds), each
         // written once and only where its file is missing, before anything
         // reads config/ (oot3d_config_defaults.h): an update never replaces a

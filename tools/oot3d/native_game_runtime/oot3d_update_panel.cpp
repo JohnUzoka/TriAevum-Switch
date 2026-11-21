@@ -48,9 +48,9 @@ std::string Megabytes(std::uint64_t bytes) {
 
 class UpdatePanel final : public Fast::Oot3d::GraphicsSettingsPanelTab {
 public:
-  explicit UpdatePanel(std::filesystem::path root)
+  UpdatePanel(std::filesystem::path root, std::string_view nroLaunchPath)
       : mRoot(std::move(root)), mConfig(mRoot / "config"),
-        mUpdater(mRoot, LoadRepository(mConfig), BuildNumber()) {
+        mUpdater(mRoot, LoadRepository(mConfig), BuildNumber(), nroLaunchPath) {
     const auto saved = ParseChannel(ReadTrimmed(mConfig / kChannelFile));
     mChannel = saved.value_or(DefaultChannelFor(BuildVersion()));
     std::error_code ignored;
@@ -279,8 +279,9 @@ private:
 };
 } // namespace
 
-std::shared_ptr<Fast::Oot3d::GraphicsSettingsPanelTab> CreateUpdatePanel(std::filesystem::path root) {
-  return std::make_shared<UpdatePanel>(std::move(root));
+std::shared_ptr<Fast::Oot3d::GraphicsSettingsPanelTab> CreateUpdatePanel(
+    std::filesystem::path root, std::string_view nroLaunchPath) {
+  return std::make_shared<UpdatePanel>(std::move(root), nroLaunchPath);
 }
 
 void FinishPendingUpdate(const std::filesystem::path &root) {

@@ -1078,7 +1078,8 @@ void NativeA32WindowSession::Setup() {
 #endif
 #if defined(__SWITCH__)
   // OTA updates from GitHub Releases, and the version at the top of the menu.
-  applicationSettingsTabs.push_back(Oot3dNativeGame::CreateUpdatePanel("sdmc:/switch/oot3dre"));
+  applicationSettingsTabs.push_back(Oot3dNativeGame::CreateUpdatePanel(
+      "sdmc:/switch/oot3dre", launch.SwitchNroLaunchPath));
   Fast::Oot3d::DebugMenuTitleText().store(Oot3dNativeGame::BuildVersion(),
                                           std::memory_order_relaxed);
 #endif

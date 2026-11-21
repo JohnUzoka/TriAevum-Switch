@@ -90,6 +90,56 @@ on a widened target. `config/topscreen_menu_backdrop` = `0` (desktop
 `TRIAEVUM_TOPSCREEN_MENU_BACKDROP=0`) restores the sky-behind-the-cards
 composition described above.
 
+## Frontend touch (issue 20)
+
+Host input already admits taps while the relocated native frontend is
+presented. On Switch the touch tracker delivers the press to the centred
+320x240 mapper, which matches the menu viewport within the 400x240 TopScreen
+image. On the guest side, the hook at `0x0041E984` runs the native touch update
+at `0x004289DC` and then applies TopScreen's record 28. That step was clearing
+the coordinates and press/release flags in `0x0050BB38`: the title-demo
+predicate matched the version chooser, and the shared scene-mode-5 viewport
+route matched File Select and Name Entry. The chooser hit-tests those fields
+through `Touch_InRect` (`0x0033F428`); the file and name controllers read them
+through `PauseInput_ReadTouch` (`0x002F9484`). Button input was not cleared.
+
+The post-update hook now preserves the guest sample while the lifecycle bridge
+reports a presented native frontend. The title reveal, transition latch,
+menu layout, gameplay suppression and Game Over policy are unchanged.
+
+The ROM-free checks are `oot3d_top_screen_mod_profile_tests` (title-demo and
+scene-mode-5 suppression, with and without frontend ownership),
+`oot3d_native_ui_lifecycle_bridge_tests` (ownership and version reveal), and
+`oot3d_native_a32_input_tests` (handheld coordinate mapping and reveal input).
+
+For a real guest smoke, use a matching desktop `oot3d_native_game` build,
+the canonical EUR host manifest, and staged `resources.o2r`. Start from a
+temporary save directory; if the first boot creates `system.dat`, relaunch
+with the same directory so the unlock-on-read option exposes both cards.
+
+```sh
+run=$(mktemp -d)
+mkdir -p "$run/savedata"
+TRIAEVUM_UNLOCK_MASTER_QUEST=1 "$OOT3D_RUNTIME" \
+  --a32-process-manifest "$OOT3D_EUR/oot3d_native_process_manifest.host.json" \
+  --resource-root "$OOT3D_RESOURCES" --config "$run/host.json" \
+  --save-data "$run/savedata" --ui-profile topscreen --renderer opengl \
+  --disable-audio --width 1280 --height 720 --output "$run/summary.json"
+```
+
+Wait for the title to remain at PRESS START with the two-version choice
+withheld. Click inside the title's centred area: the reveal click should not
+confirm either card, even when held. Release, then click and release the right
+card. Check that Master Quest File Select opens without a confirm button.
+Click and release an empty slot, then a letter on the name keyboard. Verify
+that the slot enters Name Entry and the letter is added. Repeat with the left
+card on a fresh boot for Normal. With the window closed, the summary's
+`hid_input.touch_host_frames` can confirm touch reached HID; read it alongside
+the actual menu transitions, since a positive HID count alone would also be
+possible before the fix. On handheld Switch, repeat with finger taps on the
+same targets, with the debug menu closed; this additionally exercises libnx
+touch history and the deko3d scanout, which desktop mouse clicks do not cover.
+
 ## Verification
 
 Fast ROM-free regression test (about three seconds including compilation):

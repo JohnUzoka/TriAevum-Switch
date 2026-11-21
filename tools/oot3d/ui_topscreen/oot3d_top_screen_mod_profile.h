@@ -871,14 +871,13 @@ bool ResolveTopScreenPauseRouteActive(const TopScreenPauseDrawInputs &inputs,
 std::uint32_t ResolveTopScreenPauseRoutedCommand(std::uint32_t nativeCommand,
                                                  bool routeActive) noexcept;
 // Payload helper 0x005C8E0C hides the native touch coordinates on screens the
-// 3DS mod moved off the touch screen. This port draws two of them on the one
-// screen and maps touch onto them, so it keeps them touchable: the dungeon Map
-// (the payload's Map-page plus in-dungeon layer clause; its moved columns are
-// mapped by oot3d_top_screen_page_layout.h) and the Game Over choices once they
-// are drawn (gameOverChoicesPresented, TopScreenGameOverChoicesPresented).
+// 3DS mod moved off the touch screen. This port keeps the relocated native
+// frontend touchable, preserves the Game Over choices once drawn, and omits
+// the dungeon Map clause (the moved columns map back in the touch layout).
 bool ResolveTopScreenTouchCoordinateSuppression(
     const TopScreenPauseDrawInputs &inputs, bool routeActive,
     bool gameOverChoicesPresented,
+    bool nativeFrontendPresented,
     TopScreenTouchCoordinateRouteState *state) noexcept;
 bool ApplyTopScreenTouchCoordinateSuppression(NativeA32Memory &memory,
                                               std::string *error = nullptr);

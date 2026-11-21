@@ -3185,39 +3185,65 @@ int main() {
   touchRouteInputs.SceneMode = 3U;
   touchRouteInputs.RuntimeMode = 1U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState),
+              touchRouteInputs, false, false, false, &touchRouteState),
           "ordinary mode-3 scene used the obsolete TopScreen 1.1 route");
   touchRouteInputs.EntranceIndex = 0xFFF3U;
   Require(ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState),
+              touchRouteInputs, false, false, false, &touchRouteState),
           "TopScreen 1.2 title-demo route did not suppress touch coordinates");
+  Require(!ResolveTopScreenTouchCoordinateSuppression(
+              touchRouteInputs, false, false, true, &touchRouteState),
+          "the presented Normal/Master Quest cards lost title-demo touch");
+  touchRouteInputs.NativeTransitionActive = true;
+  Require(!ResolveTopScreenTouchCoordinateSuppression(
+              touchRouteInputs, false, false, true, &touchRouteState) &&
+              touchRouteState.RuntimeSceneLatch,
+          "frontend touch bypass skipped the transition latch update");
+  touchRouteInputs.NativeTransitionActive = false;
+
+  // File Select and Name Entry share the scene-five render route. The
+  // viewport must still be routed when that scene owns native frontend touch.
+  auto fileScene = touchRouteInputs;
+  fileScene.SceneMode = 5U;
+  fileScene.RuntimeMode = 2U;
+  TopScreenPauseRouteState fileRouteState;
+  const bool fileRouteActive =
+      ResolveTopScreenPauseRouteActive(fileScene, &fileRouteState);
+  Require(fileRouteActive &&
+              !ResolveTopScreenTouchCoordinateSuppression(
+                  fileScene, fileRouteActive, false, true, &touchRouteState) &&
+              !touchRouteState.RuntimeSceneLatch &&
+              ResolveTopScreenTouchCoordinateSuppression(
+                  fileScene, fileRouteActive, false, false, &touchRouteState),
+          "the scene-five route did not preserve File Select/Name Entry touch");
+
   touchRouteInputs.RuntimeMode = 0U;
   touchRouteInputs.EntranceIndex = 0U;
   touchRouteInputs.SceneVariant = 2U;
   touchRouteInputs.SceneSequence = 4U;
   touchRouteInputs.NativeTransitionActive = true;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, false, &touchRouteState) &&
               touchRouteState.RuntimeSceneLatch,
           "record-28 runtime latch did not block its sequence route");
   touchRouteInputs.NativeTransitionActive = false;
   touchRouteInputs.SceneMode = 0U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, false, &touchRouteState) &&
               !touchRouteState.RuntimeSceneLatch,
           "record-28 runtime latch did not clear outside scene mode three");
   touchRouteInputs.SceneMode = 3U;
   Require(ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState),
+              touchRouteInputs, false, false, false, &touchRouteState),
           "record-28 sequence route did not suppress touch coordinates");
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, true, &touchRouteState),
+              touchRouteInputs, false, true, false, &touchRouteState),
           "drawn Game Over choices kept their touch coordinates suppressed");
   touchRouteInputs.SceneSequence = 7U;
   Require(!ResolveTopScreenTouchCoordinateSuppression(
-              touchRouteInputs, false, false, &touchRouteState) &&
+              touchRouteInputs, false, false, false, &touchRouteState) &&
               ResolveTopScreenTouchCoordinateSuppression(
-                  touchRouteInputs, true, true, &touchRouteState),
+                  touchRouteInputs, true, true, false, &touchRouteState),
           "record-28 route predicate changed");
 
   NativeA32Memory touchCoordinateMemory;
@@ -3377,7 +3403,7 @@ int main() {
     Require(presented == (frame >= 83U),
             "Game Over choices counted as drawn before the delay and fade ended");
     Require(ResolveTopScreenTouchCoordinateSuppression(
-                gameOverDraw, false, presented, &gameOverTouchRoute) ==
+                gameOverDraw, false, presented, false, &gameOverTouchRoute) ==
                 !presented,
             "Game Over touch was hidden from the drawn choices, or reached them "
             "before they were drawn");
@@ -3398,7 +3424,7 @@ int main() {
     const bool presented = TopScreenGameOverChoicesPresented(
         gameOverDraw, gameOverTouchRoute.RuntimeSceneLatch, visibilityState);
     Require(presented && !ResolveTopScreenTouchCoordinateSuppression(
-                             gameOverDraw, false, presented,
+                             gameOverDraw, false, presented, false,
                              &gameOverTouchRoute),
             "a drawn Game Over question did not accept taps");
     Require(TopScreenNativeTouchPageActive(gameOverDraw,

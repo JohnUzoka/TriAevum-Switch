@@ -613,11 +613,18 @@ secondary layer. The typed adapter reproduces the payload's transient
 mode-3-preserving latch and writes the exact six native touch-state halfwords
 at `0x0050BB3A..0x0050BB48`: two `0x7FFF` coordinate sentinels and four zero
 fields. It is reset on savestate load and no payload storage is recreated.
-Two clauses hide screens the 3DS mod removes from the touch screen, which this
-port draws on its one screen, so they are adapted (issue 20). The sequence
-clause is the Game Over (`GameOver_Update` `0x00458AC0` phases 3..6): it stays
-while the delay and fade run and lifts once the record-41 route has drawn the
-choices (`TopScreenGameOverChoicesPresented`). Those choices then also own the
+Several of those rules hide screens the 3DS mod moves off the touch screen,
+which this port draws on its one screen (issue 20). While the lifecycle bridge
+reports the relocated native frontend, the post-call blanking is skipped, but
+the transition latch and viewport routing still run. The title-demo predicate
+otherwise blanks touch for the Normal/Master Quest cards, and the shared
+scene-mode-5 route blanks it in File Select and Name Entry. The host already
+accepts touches on those menus; the loss was in the guest state after HID.
+See [frontend touch verification](TRIAEVUM_TOPSCREEN_FRONTEND_SKY.md#frontend-touch-issue-20).
+
+The sequence clause is the Game Over (`GameOver_Update` `0x00458AC0` phases
+3..6): it stays while the delay and fade run and lifts once the record-41
+route has drawn the choices (`TopScreenGameOverChoicesPresented`). Those choices then also own the
 host touch gate (`TopScreenNativeTouchPageActive`), since they belong to the
 native choice controller at `0x005C588C`, not to one of the four pause pages.
 The last clause is not a camera control: `0x002FCDD4` reads the Map page

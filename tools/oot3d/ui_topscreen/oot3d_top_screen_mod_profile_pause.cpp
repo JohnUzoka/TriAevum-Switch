@@ -291,6 +291,7 @@ std::uint32_t ResolveTopScreenPauseRoutedCommand(std::uint32_t nativeCommand,
 bool ResolveTopScreenTouchCoordinateSuppression(
     const TopScreenPauseDrawInputs &inputs, bool routeActive,
     bool gameOverChoicesPresented,
+    bool nativeFrontendPresented,
     TopScreenTouchCoordinateRouteState *state) noexcept {
   if (state == nullptr)
     return false;
@@ -302,6 +303,11 @@ bool ResolveTopScreenTouchCoordinateSuppression(
   } else if (!inputs.HasScene || inputs.SceneMode != 3U) {
     state->RuntimeSceneLatch = false;
   }
+
+  // The title demo and scene-five viewport still route rendering, but must
+  // not erase touch from the native frontend drawn on the same screen.
+  if (nativeFrontendPresented)
+    return false;
 
   const bool sceneRuntimeRoute = IsTopScreenTitleDemoRuntime(inputs);
   // The Game Over phases: suppressed while the choices are not yet drawn.

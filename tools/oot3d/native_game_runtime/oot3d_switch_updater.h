@@ -33,8 +33,9 @@ public:
     bool Cancelling = false;
   };
 
-  // `root` is sdmc:/switch/oot3dre; `installedBuild` this build's number.
-  SwitchUpdater(std::filesystem::path root, std::string repository, std::uint64_t installedBuild);
+  // `root` is sdmc:/switch/oot3dre; `nroLaunchPath` is the loader's argv[0].
+  SwitchUpdater(std::filesystem::path root, std::string repository, std::uint64_t installedBuild,
+                std::string_view nroLaunchPath);
   // Cancels what is running and waits for the thread.
   ~SwitchUpdater();
   SwitchUpdater(const SwitchUpdater &) = delete;
@@ -62,6 +63,7 @@ private:
   std::filesystem::path mRoot;
   std::string mRepository;
   std::uint64_t mInstalledBuild;
+  const bool mLaunchedManagedNro;
   Update::Channel mChannel = Update::Channel::Stable;
   std::function<void(const Status &)> mCheckDone; // set by Check while no worker runs
   mutable std::mutex mMutex;
